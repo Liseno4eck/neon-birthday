@@ -39,14 +39,15 @@
       title: 'С днём рождения!',
       text: 'Текст письма ты напишешь в админке.',
       sign: '',
-      photo: '',
+      photos: [],
       button: 'Продолжить'
     },
     final: {
       title: 'С Днём Рождения',
       subtitle: '',
       again: 'Ещё раз',
-      photos: []
+      photos: [],
+      interval: 2500
     }
   };
 
@@ -54,6 +55,7 @@
   var cfg = clone(DEFAULTS);
   var keyBuf = '';
   var letterOpened = false;
+  var sliders = [];
 
   /* ---------- utils ---------- */
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -92,6 +94,60 @@
       .catch(function () { /* offline / first run: keep defaults */ });
   }
 
+  /* ---------- photo slider ---------- */
+  function createSlider(wrapId, trackId, dotsId, photos, interval, arrows) {
+    var wrap = $(wrapId), track = $(trackId), dots = $(dotsId);
+    if (!wrap || !track || !dots) return null;
+    track.innerHTML = '';
+    dots.innerHTML = '';
+    if (!photos.length) { wrap.hidden = true; return null; }
+    wrap.hidden = false;
+    var idx = 0, timer = null;
+    var slides = [];
+    photos.forEach(function (p, i) {
+      var div = document.createElement('div');
+      div.className = 'slider-slide' + (i === 0 ? ' active' : '');
+      var img = document.createElement('img');
+      img.src = rawUrl(p.src || p);
+      img.alt = p.caption || ('фото ' + (i + 1));
+      img.loading = i === 0 ? 'eager' : 'lazy';
+      div.appendChild(img);
+      track.appendChild(div);
+      slides.push(div);
+      var dot = document.createElement('span');
+      if (i === 0) dot.className = 'on';
+      dot.addEventListener('click', function () { show(i); restart(); });
+      dots.appendChild(dot);
+    });
+    var dotEls = Array.prototype.slice.call(dots.children);
+    function show(i) {
+      slides[idx].classList.remove('active');
+      dotEls[idx].classList.remove('on');
+      idx = (i + slides.length) % slides.length;
+      slides[idx].classList.add('active');
+      dotEls[idx].classList.add('on');
+    }
+    function next() { show(idx + 1); }
+    function prev() { show(idx - 1); }
+    function restart() { clearInterval(timer); if (interval >= 1000 && slides.length > 1) timer = setInterval(next, interval); }
+    if (arrows) {
+      var ap = $(arrows.prev), an = $(arrows.next);
+      if (ap) ap.onclick = function () { prev(); restart(); };
+      if (an) an.onclick = function () { next(); restart(); };
+    }
+    restart();
+    // swipe support
+    var sx = 0;
+    track.addEventListener('touchstart', function (e) { sx = e.changedTouches[0].clientX; }, { passive: true });
+    track.addEventListener('touchend', function (e) {
+      var dx = e.changedTouches[0].clientX - sx;
+      if (Math.abs(dx) > 40) { dx < 0 ? next() : prev(); restart(); }
+    }, { passive: true });
+    return { stop: function () { clearInterval(timer); timer = null; }, start: restart };
+  }
+  function stopSliders() { sliders.forEach(function (s) { if (s) s.stop(); }); }
+  function startSliders() { sliders.forEach(function (s) { if (s) s.start(); }); }
+
   /* ---------- render ---------- */
   function applyTheme() {
     var t = cfg.theme || {}, r = document.documentElement.style;
@@ -104,22 +160,33 @@
   function render() {
     applyTheme();
     $$('[data-bind]').forEach(function (el) { el.textContent = get(el.dataset.bind) || ''; });
-    $('#dateInput').placeholder = 'дд.мм';
+    $('#dateInput').placeholder = 'ддмм';
 
+    // letter photos slider
+    var lPhotos = (cfg.letter && cfg.letter.photos) || [];
+    // backwards compat: single photo string
+    if (cfg.letter && cfg.letter.photo && !lPhotos.length) lPhotos = [cfg.letter.photo];
+    sliders[0] = createSlider('#letterSlider', '#letterSlider .slider-track', '#letterDots', lPhotos, 2500);
+
+    // final photos
+    var photos = (cfg.final && cfg.final.photos) || [];
     var gal = $('#gallery');
     gal.innerHTML = '';
-    var photos = (cfg.final && cfg.final.photos) || [];
     if (!photos.length) {
+      $('#finalSlider').hidden = true;
       var note = document.createElement('p');
       note.className = 'empty-note';
       note.textContent = 'Здесь появятся фотографии. Добавь их в админ-панели.';
       gal.appendChild(note);
     } else {
+      var interval = (cfg.final && cfg.final.interval) || 2500;
+      sliders[1] = createSlider('#finalSlider', '#finalTrack', '#finalDots', photos, interval,
+        { prev: '#finalPrev', next: '#finalNext' });
+      // mini thumbnails below slider
       photos.forEach(function (p, i) {
         var f = document.createElement('figure');
         f.className = 'shot';
-        f.style.animation = 'in .7s cubic-bezier(.2,.8,.2,1) both';
-        f.style.animationDelay = (i * 0.11) + 's';
+        f.style.animationDelay = (i * 0.08) + 's';
         var img = document.createElement('img');
         img.src = rawUrl(p.src || p);
         img.alt = (p.caption || 'фото ' + (i + 1));
@@ -130,21 +197,9 @@
           cap.textContent = p.caption;
           f.appendChild(cap);
         }
-        for (var s = 0; s < 3; s++) {
-          var sp = document.createElement('span');
-          sp.className = 'spark';
-          sp.style.left = (8 + Math.random() * 84) + '%';
-          sp.style.top = (8 + Math.random() * 84) + '%';
-          sp.style.animationDelay = (Math.random() * 2.6) + 's';
-          f.appendChild(sp);
-        }
         gal.appendChild(f);
       });
     }
-
-    var lp = (cfg.letter && cfg.letter.photo) || '';
-    var box = $('#letterPhotoBox');
-    if (lp) { $('#letterPhoto').src = rawUrl(lp); box.hidden = false; } else { box.hidden = true; }
 
     buildDots();
   }
@@ -164,6 +219,7 @@
   }
   function go(name) {
     if (ORDER.indexOf(name) < 0) return;
+    stopSliders();
     var from = $('.screen.is-active');
     if (from) {
       from.style.transition = 'opacity .28s, transform .28s';
@@ -176,6 +232,7 @@
       to.classList.add('is-active');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       buildDots();
+      startSliders();
       if (name === 'final') burst();
     }, from ? 280 : 0);
   }
@@ -261,7 +318,8 @@
 
   /* ---------- flow ---------- */
   function normDate(v) {
-    var m = String(v).trim().replace(/[\/\-\s]/g, '.').match(/^(\d{1,2})\.(\d{1,2})/);
+    var s = String(v).trim().replace(/[-\s]/g, '');
+    var m = s.match(/^(\d{1,2})(\d{1,2})$/);
     if (!m) return null;
     var d = parseInt(m[1], 10), mo = parseInt(m[2], 10);
     if (d < 1 || d > 31 || mo < 1 || mo > 12) return null;
