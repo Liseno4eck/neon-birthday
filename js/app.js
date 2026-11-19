@@ -1,100 +1,367 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#07000f">
-<title>С Днём Рождения ♥</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;500;700&family=Manrope:wght@300;400;600&family=Caveat:wght@400;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=3">
-</head>
-<body>
-<canvas id="hearts" aria-hidden="true"></canvas>
-<div class="neon-blob blob-1" aria-hidden="true"></div>
-<div class="neon-blob blob-2" aria-hidden="true"></div>
-<div class="neon-blob blob-3" aria-hidden="true"></div>
-<div class="grid-overlay" aria-hidden="true"></div>
+/* ============================================================
+   Neon Birthday - site logic
+   Content is loaded from a public GitHub repo (content repo),
+   so every change the owner publishes is visible to everyone.
+   ============================================================ */
+(function () {
+  'use strict';
 
-<main id="stage">
+  var STORE = {
+    owner: 'Liseno4eck',
+    repo: 'bday-content',
+    branch: 'main',
+    path: 'content.json'
+  };
 
-  <section class="screen is-active" id="s-intro">
-    <div class="card">
-      <div class="badge">01 / 05</div>
-      <h1 class="title neon-1" data-bind="intro.title">Приветик</h1>
-      <p class="text multiline" data-bind="intro.text"></p>
-      <button class="btn" data-next="check"><span data-bind="intro.button">Далее</span> <i>&#8594;</i></button>
-    </div>
-  </section>
+  var DEFAULTS = {
+    secret: '1234',
+    birthday: '19.11',
+    theme: { n1: '#ff2bd1', n2: '#7b5cff', n3: '#00e5ff', bg: '#07000f', hearts: true },
+    intro: {
+      title: 'Приветик',
+      text: 'Думаю, ты знаешь, что я увлекаюсь программированием.',
+      button: 'Далее'
+    },
+    check: {
+      title: 'Так что...',
+      text: 'Знаю, что у тебя сегодня день рождения. Давай проверим, не ошибся ли я.',
+      button: 'Далее'
+    },
+    date: {
+      title: 'Когда у тебя ДР?',
+      button: 'Проверить',
+      hint: 'введи дату в формате дд.мм',
+      error: 'Хм, не похоже. Попробуй ещё раз'
+    },
+    letter: {
+      envelopeTitle: 'Тебе письмо',
+      hint: 'Нажми на конверт, чтобы открыть',
+      title: 'С днём рождения!',
+      text: 'Текст письма ты напишешь в админке.',
+      sign: '',
+      photo: '',
+      button: 'Продолжить'
+    },
+    final: {
+      title: 'С Днём Рождения',
+      subtitle: '',
+      again: 'Ещё раз',
+      photos: []
+    }
+  };
 
-  <section class="screen" id="s-check">
-    <div class="card">
-      <div class="badge">02 / 05</div>
-      <h1 class="title neon-2" data-bind="check.title">Так что...</h1>
-      <p class="text multiline" data-bind="check.text"></p>
-      <button class="btn" data-next="date"><span data-bind="check.button">Далее</span> <i>&#8594;</i></button>
-    </div>
-  </section>
+  var ORDER = ['intro', 'check', 'date', 'letter', 'final'];
+  var cfg = clone(DEFAULTS);
+  var keyBuf = '';
+  var letterOpened = false;
 
-  <section class="screen" id="s-date">
-    <div class="card">
-      <div class="badge">03 / 05</div>
-      <h1 class="title neon-1" data-bind="date.title">Когда у тебя ДР?</h1>
-      <form id="dateForm" autocomplete="off">
-        <input id="dateInput" class="input" type="text" inputmode="numeric" maxlength="10" placeholder="дд.мм" aria-label="Дата в формате дд.мм">
-        <div class="row">
-          <button class="btn" type="submit"><span data-bind="date.button">Проверить</span> <i>&#9829;</i></button>
-        </div>
-        <p class="error" id="dateError" role="alert"></p>
-        <p class="hint multiline" data-bind="date.hint"></p>
-      </form>
-    </div>
-  </section>
+  /* ---------- utils ---------- */
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function $(s, r) { return (r || document).querySelector(s); }
+  function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  function merge(base, over) {
+    for (var k in over) {
+      if (!Object.prototype.hasOwnProperty.call(over, k)) continue;
+      var v = over[k];
+      if (v && typeof v === 'object' && !Array.isArray(v) && base[k] && typeof base[k] === 'object' && !Array.isArray(base[k])) {
+        merge(base[k], v);
+      } else if (v !== undefined && v !== null) {
+        base[k] = v;
+      }
+    }
+    return base;
+  }
+  function get(path) {
+    return path.split('.').reduce(function (o, k) { return o == null ? o : o[k]; }, cfg);
+  }
+  function rawUrl(path) {
+    if (!path) return '';
+    if (/^(https?:|data:|blob:)/i.test(path)) return path;
+    return 'https://raw.githubusercontent.com/' + STORE.owner + '/' + STORE.repo + '/' + STORE.branch + '/' +
+      path.replace(/^\/+/, '');
+  }
+  window.RAW_URL = rawUrl;
+  window.STORE = STORE;
 
-  <section class="screen" id="s-letter">
-    <div class="letter-stage" id="letterStage">
-      <p class="env-title" data-bind="letter.envelopeTitle"></p>
-      <button class="envelope" id="envelope" aria-label="Открыть письмо">
-        <span class="env-body"></span>
-        <span class="env-flap"></span>
-        <span class="env-seal">&#9829;</span>
-      </button>
-      <p class="env-hint" id="envHint" data-bind="letter.hint">Нажми на конверт, чтобы открыть</p>
+  /* ---------- content load ---------- */
+  function loadContent() {
+    var url = rawUrl(STORE.path) + '?t=' + Date.now();
+    return fetch(url, { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function (json) { merge(cfg, json); })
+      .catch(function () { /* offline / first run: keep defaults */ });
+  }
 
-      <article class="paper" id="paper" hidden>
-        <div class="paper-head">
-          <span class="paper-stamp">&#9829;</span>
-          <h2 class="paper-title" data-bind="letter.title"></h2>
-        </div>
-        <figure class="paper-photo" id="letterPhotoBox" hidden>
-          <img id="letterPhoto" alt="">
-        </figure>
-        <div class="paper-text multiline" data-bind="letter.text"></div>
-        <div class="paper-sign" data-bind="letter.sign"></div>
-        <div class="paper-actions">
-          <button class="btn" id="letterNext" hidden><span data-bind="letter.button">Продолжить</span> <i>&#8594;</i></button>
-        </div>
-      </article>
-    </div>
-  </section>
+  /* ---------- render ---------- */
+  function applyTheme() {
+    var t = cfg.theme || {}, r = document.documentElement.style;
+    r.setProperty('--n1', t.n1 || DEFAULTS.theme.n1);
+    r.setProperty('--n2', t.n2 || DEFAULTS.theme.n2);
+    r.setProperty('--n3', t.n3 || DEFAULTS.theme.n3);
+    r.setProperty('--bg', t.bg || DEFAULTS.theme.bg);
+    document.body.style.background = t.bg || DEFAULTS.theme.bg;
+  }
+  function render() {
+    applyTheme();
+    $$('[data-bind]').forEach(function (el) { el.textContent = get(el.dataset.bind) || ''; });
+    $('#dateInput').placeholder = 'дд.мм';
 
-  <section class="screen" id="s-final">
-    <div class="final-wrap">
-      <h1 class="big-title"><span data-bind="final.title">С Днём Рождения</span> <em class="heart">&#9829;</em></h1>
-      <p class="sub-title multiline" data-bind="final.subtitle"></p>
-      <div class="gallery" id="gallery"></div>
-      <button class="btn btn-ghost" id="restart"><i>&#8635;</i> <span data-bind="final.again">Ещё раз</span></button>
-    </div>
-  </section>
+    var gal = $('#gallery');
+    gal.innerHTML = '';
+    var photos = (cfg.final && cfg.final.photos) || [];
+    if (!photos.length) {
+      var note = document.createElement('p');
+      note.className = 'empty-note';
+      note.textContent = 'Здесь появятся фотографии. Добавь их в админ-панели.';
+      gal.appendChild(note);
+    } else {
+      photos.forEach(function (p, i) {
+        var f = document.createElement('figure');
+        f.className = 'shot';
+        f.style.animation = 'in .7s cubic-bezier(.2,.8,.2,1) both';
+        f.style.animationDelay = (i * 0.11) + 's';
+        var img = document.createElement('img');
+        img.src = rawUrl(p.src || p);
+        img.alt = (p.caption || 'фото ' + (i + 1));
+        img.loading = 'lazy';
+        f.appendChild(img);
+        if (p.caption) {
+          var cap = document.createElement('figcaption');
+          cap.textContent = p.caption;
+          f.appendChild(cap);
+        }
+        for (var s = 0; s < 3; s++) {
+          var sp = document.createElement('span');
+          sp.className = 'spark';
+          sp.style.left = (8 + Math.random() * 84) + '%';
+          sp.style.top = (8 + Math.random() * 84) + '%';
+          sp.style.animationDelay = (Math.random() * 2.6) + 's';
+          f.appendChild(sp);
+        }
+        gal.appendChild(f);
+      });
+    }
 
-</main>
+    var lp = (cfg.letter && cfg.letter.photo) || '';
+    var box = $('#letterPhotoBox');
+    if (lp) { $('#letterPhoto').src = rawUrl(lp); box.hidden = false; } else { box.hidden = true; }
 
-<nav id="dots"></nav>
-<div id="toast" role="status" aria-live="polite"></div>
-<div id="admin" hidden></div>
+    buildDots();
+  }
 
-<script src="js/app.js?v=3"></script>
-<script src="js/admin.js?v=3"></script>
-</body>
-</html>
+  function buildDots() {
+    var d = $('#dots');
+    d.innerHTML = '';
+    ORDER.forEach(function (name) {
+      var s = document.createElement('span');
+      if (name === current()) s.className = 'on';
+      d.appendChild(s);
+    });
+  }
+  function current() {
+    var a = $('.screen.is-active');
+    return a ? a.id.replace('s-', '') : 'intro';
+  }
+  function go(name) {
+    if (ORDER.indexOf(name) < 0) return;
+    var from = $('.screen.is-active');
+    if (from) {
+      from.style.transition = 'opacity .28s, transform .28s';
+      from.style.opacity = '0';
+      from.style.transform = 'translateY(-18px)';
+      setTimeout(function () { from.classList.remove('is-active'); from.style.opacity = ''; from.style.transform = ''; }, 260);
+    }
+    setTimeout(function () {
+      var to = $('#s-' + name);
+      to.classList.add('is-active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      buildDots();
+      if (name === 'final') burst();
+    }, from ? 280 : 0);
+  }
+  window.GO = go;
+
+  /* ---------- hearts background ---------- */
+  var cv = $('#hearts'), ctx = cv.getContext('2d'), hearts = [], W = 0, H = 0, raf = null;
+  function sizeCv() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px'; cv.style.height = innerHeight + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function newH(start) {
+    var t = cfg.theme || DEFAULTS.theme;
+    var cols = [t.n1, t.n2, t.n3, '#ffffff'];
+    return {
+      x: Math.random() * innerWidth,
+      y: start ? Math.random() * innerHeight : innerHeight + 30,
+      s: 6 + Math.random() * 20,
+      vy: .25 + Math.random() * .85,
+      drift: (Math.random() - .5) * .7,
+      a: .10 + Math.random() * .45,
+      rot: (Math.random() - .5) * .7,
+      vr: (Math.random() - .5) * .012,
+      c: cols[(Math.random() * cols.length) | 0]
+    };
+  }
+  function drawHeart(x, y, s, rot, c, a) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s / 20, s / 20);
+    ctx.globalAlpha = a; ctx.fillStyle = c; ctx.shadowColor = c; ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.moveTo(0, 6);
+    ctx.bezierCurveTo(0, 0, -10, -2, -10, 6);
+    ctx.bezierCurveTo(-10, 13, 0, 18, 0, 23);
+    ctx.bezierCurveTo(0, 18, 10, 13, 10, 6);
+    ctx.bezierCurveTo(10, -2, 0, 0, 0, 6);
+    ctx.fill(); ctx.restore();
+  }
+  function loop() {
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    if (cfg.theme && cfg.theme.hearts) {
+      if (hearts.length < 34) hearts.push(newH(false));
+      for (var i = hearts.length - 1; i >= 0; i--) {
+        var h = hearts[i];
+        h.y -= h.vy; h.x += h.drift + Math.sin(h.y / 90) * .35; h.rot += h.vr;
+        if (h.y < -50) hearts[i] = newH(false);
+        drawHeart(h.x, h.y, h.s, h.rot, h.c, h.a);
+      }
+    } else if (hearts.length) {
+      hearts = []; ctx.clearRect(0, 0, innerWidth, innerHeight);
+    }
+    raf = requestAnimationFrame(loop);
+  }
+  function burst() {
+    for (var i = 0; i < 26; i++) {
+      var h = newH(false);
+      h.y = innerHeight * (0.55 + Math.random() * 0.45);
+      h.vy = .8 + Math.random() * 1.8;
+      h.a = .3 + Math.random() * .5;
+      hearts.push(h);
+    }
+  }
+  window.BURST = burst;
+
+  /* ---------- secret combo ---------- */
+  function checkSecret() {
+    var s = (cfg.secret || DEFAULTS.secret).toLowerCase();
+    if (s && keyBuf.length >= s.length && keyBuf.slice(-s.length) === s) {
+      keyBuf = '';
+      if (window.openAdmin) window.openAdmin();
+    }
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && window.closeAdmin) { window.closeAdmin(); return; }
+    if (!e.key || e.key.length !== 1) return;
+    var tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'TEXTAREA') return;
+    keyBuf = (keyBuf + e.key.toLowerCase()).slice(-40);
+    checkSecret();
+  });
+
+  /* ---------- flow ---------- */
+  function normDate(v) {
+    var m = String(v).trim().replace(/[\/\-\s]/g, '.').match(/^(\d{1,2})\.(\d{1,2})/);
+    if (!m) return null;
+    var d = parseInt(m[1], 10), mo = parseInt(m[2], 10);
+    if (d < 1 || d > 31 || mo < 1 || mo > 12) return null;
+    return (d < 10 ? '0' + d : '' + d) + '.' + (mo < 10 ? '0' + mo : '' + mo);
+  }
+  function isBirthday(v) {
+    var want = normDate(cfg.birthday || DEFAULTS.birthday);
+    return want && v === want;
+  }
+  window.IS_BIRTHDAY = isBirthday;
+
+  function init() {
+    sizeCv();
+    window.addEventListener('resize', sizeCv);
+    loop();
+
+    $$('[data-next]').forEach(function (b) {
+      b.addEventListener('click', function () { go(b.dataset.next); });
+    });
+
+    var input = $('#dateInput'), err = $('#dateError');
+    input.addEventListener('input', function () {
+      input.classList.remove('bad');
+      err.textContent = '';
+      // secret can also be typed straight into the date field
+      var flat = input.value.replace(/[^0-9a-z#*]/gi, '').toLowerCase();
+      var sec = String(cfg.secret || DEFAULTS.secret).toLowerCase();
+      if (sec && flat.indexOf(sec) >= 0 && flat.length >= sec.length) {
+        input.value = '';
+        keyBuf = '';
+        if (window.openAdmin) window.openAdmin();
+      }
+    });
+    $('#dateForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var flat = input.value.replace(/[^0-9a-z#*]/gi, '').toLowerCase();
+      var sec = String(cfg.secret || DEFAULTS.secret).toLowerCase();
+      if (sec && flat === sec) {
+        input.value = '';
+        keyBuf = '';
+        if (window.openAdmin) window.openAdmin();
+        else window.TOAST('Админ-панель не загрузилась');
+        return;
+      }
+      var v = normDate(input.value);
+      if (!v) {
+        input.classList.add('bad');
+        err.textContent = (cfg.date.hint || '') ? 'Нужна дата в формате дд.мм' : 'Не похоже на дату';
+        return;
+      }
+      if (isBirthday(v)) { go('letter'); }
+      else {
+        input.classList.add('bad');
+        err.textContent = cfg.date.error || 'Не угадал';
+        input.select();
+      }
+    });
+
+    $('#envelope').addEventListener('click', openLetter);
+    $('#letterNext').addEventListener('click', function () { go('final'); });
+    $('#restart').addEventListener('click', function () {
+      letterOpened = false;
+      $('#paper').hidden = true;
+      $('#letterNext').hidden = true;
+      var env = $('#envelope');
+      env.classList.remove('open');
+      $('#envHint').classList.remove('gone');
+      go('intro');
+    });
+
+    render();
+    loadContent().then(render).then(function () {
+      if (window.AdminBoot) window.AdminBoot();
+    });
+  }
+
+  function openLetter() {
+    if (letterOpened) return;
+    letterOpened = true;
+    $('#envelope').classList.add('open');
+    $('#envHint').classList.add('gone');
+    setTimeout(function () {
+      $('#paper').hidden = false;
+      burst();
+      setTimeout(function () { $('#letterNext').hidden = false; }, 900);
+    }, 620);
+  }
+
+  /* ---------- helpers for admin ---------- */
+  window.CFG = function () { return cfg; };
+  window.SET_CFG = function (next) { cfg = merge(clone(DEFAULTS), next || {}); render(); };
+  window.DEFAULTS = DEFAULTS;
+  window.TOAST = function (msg) {
+    var t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('on');
+    clearTimeout(t._t);
+    t._t = setTimeout(function () { t.classList.remove('on'); }, 2600);
+  };
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
