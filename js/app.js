@@ -254,7 +254,7 @@
     if (e.key === 'Escape' && window.closeAdmin) { window.closeAdmin(); return; }
     if (!e.key || e.key.length !== 1) return;
     var tag = (document.activeElement && document.activeElement.tagName) || '';
-    if (tag === 'TEXTAREA') return;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     keyBuf = (keyBuf + e.key.toLowerCase()).slice(-40);
     checkSecret();
   });
@@ -287,9 +287,9 @@
       input.classList.remove('bad');
       err.textContent = '';
       // secret can also be typed straight into the date field
-      var flat = input.value.replace(/[^0-9a-z#*]/gi, '').toLowerCase();
+      var flat = input.value.trim().toLowerCase();
       var sec = String(cfg.secret || DEFAULTS.secret).toLowerCase();
-      if (sec && flat.indexOf(sec) >= 0 && flat.length >= sec.length) {
+      if (sec && flat === sec) {
         input.value = '';
         keyBuf = '';
         if (window.openAdmin) window.openAdmin();
@@ -297,7 +297,7 @@
     });
     $('#dateForm').addEventListener('submit', function (e) {
       e.preventDefault();
-      var flat = input.value.replace(/[^0-9a-z#*]/gi, '').toLowerCase();
+      var flat = input.value.trim().toLowerCase();
       var sec = String(cfg.secret || DEFAULTS.secret).toLowerCase();
       if (sec && flat === sec) {
         input.value = '';
