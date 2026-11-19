@@ -42,7 +42,7 @@
       <div class="badge">03 / 05</div>
       <h1 class="title neon-1" data-bind="date.title">Когда у тебя ДР?</h1>
       <form id="dateForm" autocomplete="off">
-        <input id="dateInput" class="input" type="text" inputmode="numeric" maxlength="10" placeholder="дд.мм" aria-label="Дата в формате дд.мм">
+        <input id="dateInput" class="input" type="text" inputmode="numeric" maxlength="5" placeholder="ддмм" aria-label="Дата в формате ддмм">
         <div class="row">
           <button class="btn" type="submit"><span data-bind="date.button">Проверить</span> <i>&#9829;</i></button>
         </div>
@@ -67,9 +67,12 @@
           <span class="paper-stamp">&#9829;</span>
           <h2 class="paper-title" data-bind="letter.title"></h2>
         </div>
-        <figure class="paper-photo" id="letterPhotoBox" hidden>
-          <img id="letterPhoto" alt="">
-        </figure>
+        <div class="photo-slider" id="letterSlider" hidden>
+          <div class="slider-track">
+            <div class="slider-slide active"><img id="letterPhoto" alt=""></div>
+          </div>
+          <div class="slider-dots" id="letterDots"></div>
+        </div>
         <div class="paper-text multiline" data-bind="letter.text"></div>
         <div class="paper-sign" data-bind="letter.sign"></div>
         <div class="paper-actions">
@@ -83,6 +86,12 @@
     <div class="final-wrap">
       <h1 class="big-title"><span data-bind="final.title">С Днём Рождения</span> <em class="heart">&#9829;</em></h1>
       <p class="sub-title multiline" data-bind="final.subtitle"></p>
+      <div class="photo-slider slider-lg" id="finalSlider" hidden>
+        <div class="slider-track" id="finalTrack"></div>
+        <button class="slider-arrow prev" id="finalPrev" aria-label="Предыдущее">&#8249;</button>
+        <button class="slider-arrow next" id="finalNext" aria-label="Следующее">&#8250;</button>
+        <div class="slider-dots" id="finalDots"></div>
+      </div>
       <div class="gallery" id="gallery"></div>
       <button class="btn btn-ghost" id="restart"><i>&#8635;</i> <span data-bind="final.again">Ещё раз</span></button>
     </div>
