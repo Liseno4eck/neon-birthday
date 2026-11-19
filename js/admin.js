@@ -76,10 +76,11 @@
       sec('Экран 4 — письмо', fld('letter.envelopeTitle', 'Подпись над конвертом') + fld('letter.hint', 'Подсказка') +
         fld('letter.title', 'Заголовок письма') + fld('letter.text', 'Текст письма', 1) +
         fld('letter.sign', 'Подпись') + fld('letter.button', 'Кнопка') +
-        '<div class="a-fld"><span>Фото в письме</span><div class="a-img" id="aLetterImg"></div>' +
-        '<input type="file" id="aLetterFile" accept="image/*" class="a-file"></div>') +
+        '<div class="a-fld"><span>Фото в письме (несколько, листаются)</span><div class="a-grid" id="aLetterPhotos"></div>' +
+        '<input type="file" id="aLetterFile" accept="image/*" multiple class="a-file"></div>') +
       sec('Экран 5 — финал', fld('final.title', 'Большой заголовок') + fld('final.subtitle', 'Подзаголовок', 1) +
         fld('final.again', 'Кнопка') +
+        '<label class="a-fld"><span>Интервал смены фото (мс)</span><input type="number" data-f="final.interval" value="' + esc(get('final.interval')) + '" min="1000" max="10000" step="500"></label>' +
         '<div class="a-fld"><span>Фотографии</span><div class="a-grid" id="aPhotos"></div>' +
         '<input type="file" id="aAddPhoto" accept="image/*" multiple class="a-file"></div>') +
       sec('Секрет и фон',
@@ -195,30 +196,31 @@
   }
 
   /* ---------- photos ---------- */
-  function renderPhotos() {
-    if (!el.photos) return;
-    var list = (window.CFG().final && window.CFG().final.photos) || [];
-    el.photos.innerHTML = '';
+  function renderThumbGrid(container, list, prefix) {
+    container.innerHTML = '';
     list.forEach(function (p, i) {
       var src = p.src || p;
       var cap = p.caption || '';
       var d = document.createElement('div');
       d.className = 'a-thumb';
       d.innerHTML = '<img src="' + esc(window.RAW_URL(src)) + '" alt="">' +
-        '<input data-cap="' + i + '" placeholder="подпись" value="' + esc(cap) + '">' +
-        (i > 0 ? '<button class="a-mv" data-mv="' + i + '" data-dir="-1">&#8592;</button>' : '') +
-        (i < list.length - 1 ? '<button class="a-mv r" data-mv="' + i + '" data-dir="1">&#8594;</button>' : '') +
-        '<button class="a-del" data-del="' + i + '" title="Удалить">&#10005;</button>';
-      el.photos.appendChild(d);
+        '<input data-' + prefix + '-cap="' + i + '" placeholder="подпись" value="' + esc(cap) + '">' +
+        (i > 0 ? '<button class="a-mv" data-' + prefix + '-mv="' + i + '" data-dir="-1">&#8592;</button>' : '') +
+        (i < list.length - 1 ? '<button class="a-mv r" data-' + prefix + '-mv="' + i + '" data-dir="1">&#8594;</button>' : '') +
+        '<button class="a-del" data-' + prefix + '-del="' + i + '" title="Удалить">&#10005;</button>';
+      container.appendChild(d);
     });
-    if (!list.length) el.photos.innerHTML = '<span class="a-mini">пока пусто</span>';
+    if (!list.length) container.innerHTML = '<span class="a-mini">пока пусто</span>';
+  }
 
-    var lp = get('letter.photo');
-    el.letter.innerHTML = lp
-      ? '<img src="' + esc(window.RAW_URL(lp)) + '"><button class="a-btn" id="aLetterDel">Убрать фото</button>'
-      : '<span class="a-mini">фото не добавлено</span>';
-    var del = $('#aLetterDel', el.letter);
-    if (del) del.onclick = function () { setCfg('letter.photo', ''); mark(); renderPhotos(); };
+  function renderPhotos() {
+    if (!el.photos) return;
+    var list = (window.CFG().final && window.CFG().final.photos) || [];
+    renderThumbGrid(el.photos, list, 'ph');
+
+    var lp = (get('letter.photos') || []);
+    if (get('letter.photo') && !lp.length) lp = [{ src: get('letter.photo'), caption: '' }];
+    renderThumbGrid(el.letter, lp, 'lt');
   }
 
   function fileToData(file, maxSide, q) {
@@ -269,7 +271,7 @@
     el.root.innerHTML = tpl();
     el.state = $('#aState', el.root);
     el.photos = $('#aPhotos', el.root);
-    el.letter = $('#aLetterImg', el.root);
+    el.letter = $('#aLetterPhotos', el.root);
     bindInputs();
     renderPhotos();
 
@@ -278,31 +280,42 @@
 
     el.root.addEventListener('input', function (e) {
       var n = e.target;
-      if (!n.dataset || !n.dataset.f) return;
-      setCfg(n.dataset.f, n.type === 'checkbox' ? n.checked : n.value);
-      mark();
-      if (/^theme\./.test(n.dataset.f)) window.SET_CFG(window.CFG());
-    });
-
-    el.photos.addEventListener('click', function (e) {
-      var t = e.target;
-      var list = (window.CFG().final.photos || []).slice();
-      if (t.dataset.del != null) {
-        list.splice(+t.dataset.del, 1);
-        setCfg('final.photos', list); mark(); renderPhotos();
-      } else if (t.dataset.mv != null) {
-        var i = +t.dataset.mv, j = i + (+t.dataset.dir);
-        if (list[j]) { var tmp = list[i]; list[i] = list[j]; list[j] = tmp; setCfg('final.photos', list); mark(); renderPhotos(); }
+      if (!n.dataset) return;
+      if (n.dataset.f) {
+        setCfg(n.dataset.f, n.type === 'checkbox' ? n.checked : (n.type === 'number' ? +n.value : n.value));
+        mark();
+        if (/^theme\./.test(n.dataset.f)) window.SET_CFG(window.CFG());
+      }
+      // captions for final photos
+      if (n.dataset.phCap != null) {
+        var list = (window.CFG().final.photos || []).slice();
+        var it = list[+n.dataset.phCap];
+        list[+n.dataset.phCap] = (typeof it === 'string') ? { src: it, caption: n.value } : Object.assign({}, it, { caption: n.value });
+        window.CFG().final.photos = list; mark();
+      }
+      // captions for letter photos
+      if (n.dataset.ltCap != null) {
+        var lp = (get('letter.photos') || []).slice();
+        var li = lp[+n.dataset.ltCap];
+        lp[+n.dataset.ltCap] = (typeof li === 'string') ? { src: li, caption: n.value } : Object.assign({}, li, { caption: n.value });
+        window.CFG().letter.photos = lp; mark();
       }
     });
-    el.photos.addEventListener('input', function (e) {
+
+    el.root.addEventListener('click', function (e) {
       var t = e.target;
-      if (t.dataset.cap == null) return;
-      var list = (window.CFG().final.photos || []).slice();
-      var it = list[+t.dataset.cap];
-      list[+t.dataset.cap] = (typeof it === 'string') ? { src: it, caption: t.value } : Object.assign({}, it, { caption: t.value });
-      window.CFG().final.photos = list;
-      mark();
+      // final photos
+      if (el.photos && el.photos.contains(t)) {
+        var list = (window.CFG().final.photos || []).slice();
+        if (t.dataset.phDel != null) { list.splice(+t.dataset.phDel, 1); setCfg('final.photos', list); mark(); renderPhotos(); }
+        else if (t.dataset.phMv != null) { var i = +t.dataset.phMv, j = i + (+t.dataset.dir); if (list[j]) { var tmp = list[i]; list[i] = list[j]; list[j] = tmp; setCfg('final.photos', list); mark(); renderPhotos(); } }
+      }
+      // letter photos
+      if (el.letter && el.letter.contains(t)) {
+        var lp = (get('letter.photos') || []).slice();
+        if (t.dataset.ltDel != null) { lp.splice(+t.dataset.ltDel, 1); setCfg('letter.photos', lp); mark(); renderPhotos(); }
+        else if (t.dataset.ltMv != null) { var li = +t.dataset.ltMv, lj = li + (+t.dataset.dir); if (lp[lj]) { var lt = lp[li]; lp[li] = lp[lj]; lp[lj] = lt; setCfg('letter.photos', lp); mark(); renderPhotos(); } }
+      }
     });
 
     $('#aClose', el.root).onclick = close;
@@ -346,14 +359,21 @@
     };
 
     $('#aLetterFile', el.root).onchange = function (e) {
-      var f = e.target.files && e.target.files[0];
+      var files = Array.prototype.slice.call(e.target.files || []);
       e.target.value = '';
-      if (!f) return;
+      if (!files.length) return;
       state('загружаю фото письма...');
-      uploadImage(f).then(function (url) {
-        setCfg('letter.photo', url); mark(); renderPhotos();
-        state('готово — не забудь Опубликовать');
-      }).catch(function (err) { state('ошибка'); window.TOAST(err.message); });
+      files.reduce(function (p, f) {
+        return p.then(function () {
+          return uploadImage(f).then(function (url) {
+            var lp = (get('letter.photos') || []).slice();
+            lp.push({ src: url, caption: '' });
+            setCfg('letter.photos', lp); mark(); renderPhotos();
+          });
+        });
+      }, Promise.resolve())
+        .then(function () { state('готово — не забудь Опубликовать'); window.TOAST('Фото письма добавлены'); })
+        .catch(function (err) { state('ошибка'); window.TOAST(err.message); });
     };
   }
 
