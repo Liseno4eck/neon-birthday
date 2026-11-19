@@ -251,13 +251,12 @@
     }
   }
   document.addEventListener('keydown', function (e) {
-    if (e.key && e.key.length === 1 && !/^(https?|mailto):/.test(location.href) ) {
-      var tag = (document.activeElement && document.activeElement.tagName) || '';
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      keyBuf = (keyBuf + e.key.toLowerCase()).slice(-24);
-      checkSecret();
-    }
-    if (e.key === 'Escape' && window.closeAdmin) window.closeAdmin();
+    if (e.key === 'Escape' && window.closeAdmin) { window.closeAdmin(); return; }
+    if (!e.key || e.key.length !== 1) return;
+    var tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'TEXTAREA') return;
+    keyBuf = (keyBuf + e.key.toLowerCase()).slice(-40);
+    checkSecret();
   });
 
   /* ---------- flow ---------- */
@@ -287,14 +286,26 @@
     input.addEventListener('input', function () {
       input.classList.remove('bad');
       err.textContent = '';
-      var tag = (document.activeElement && document.activeElement.tagName) || '';
-      if (tag === 'INPUT') {
-        keyBuf = (keyBuf + input.value.slice(-1).toLowerCase()).slice(-24);
-        checkSecret();
+      // secret can also be typed straight into the date field
+      var flat = input.value.replace(/[^0-9a-z#*]/gi, '').toLowerCase();
+      var sec = String(cfg.secret || DEFAULTS.secret).toLowerCase();
+      if (sec && flat.indexOf(sec) >= 0 && flat.length >= sec.length) {
+        input.value = '';
+        keyBuf = '';
+        if (window.openAdmin) window.openAdmin();
       }
     });
     $('#dateForm').addEventListener('submit', function (e) {
       e.preventDefault();
+      var flat = input.value.replace(/[^0-9a-z#*]/gi, '').toLowerCase();
+      var sec = String(cfg.secret || DEFAULTS.secret).toLowerCase();
+      if (sec && flat === sec) {
+        input.value = '';
+        keyBuf = '';
+        if (window.openAdmin) window.openAdmin();
+        else window.TOAST('Админ-панель не загрузилась');
+        return;
+      }
       var v = normDate(input.value);
       if (!v) {
         input.classList.add('bad');
