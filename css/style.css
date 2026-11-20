@@ -233,3 +233,35 @@ body::before{
   .shot:hover{transform:none}
 }
 @media (prefers-reduced-motion:reduce){ *{animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important} }
+
+/* ---------- QR modal ---------- */
+#qrModal{position:fixed; inset:0; z-index:120; display:grid; place-items:center; padding:18px;
+  background:rgba(5,0,12,.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+  animation:qrFade .3s ease both}
+@keyframes qrFade{from{opacity:0}to{opacity:1}}
+.qr-card{position:relative; max-width:min(420px,94vw); width:100%; padding:22px 20px 20px; text-align:center;
+  background:linear-gradient(160deg,#1b0530,#12001f); border:1px solid var(--stroke); border-radius:22px;
+  box-shadow:0 0 70px rgba(255,43,209,.4),0 30px 80px rgba(0,0,0,.7);
+  animation:qrPop .38s cubic-bezier(.2,.9,.2,1.2) both}
+@keyframes qrPop{from{opacity:0;transform:scale(.86) translateY(18px)}to{opacity:1;transform:none}}
+.qr-card b{display:block; font-family:'Unbounded'; font-weight:500; font-size:15px; margin:0 0 4px; color:#fff}
+.qr-x{position:absolute; top:10px; right:12px; width:30px; height:30px; border:0; border-radius:50%;
+  background:rgba(255,255,255,.08); color:var(--txt); font-size:14px; cursor:pointer; transition:.2s}
+.qr-x:hover{background:var(--n1); color:#fff}
+.qr-canvas{display:grid; place-items:center; margin:10px 0 12px}
+.qr-canvas canvas{max-width:100%; height:auto}
+.qr-url{font-size:11px; color:var(--txt-dim); word-break:break-all; margin-bottom:14px; letter-spacing:.02em}
+.qr-actions{display:flex; gap:8px; justify-content:center; flex-wrap:wrap}
+
+/* ---------- admin: current settings ---------- */
+.a-cur{background:rgba(0,229,255,.06); border:1px solid rgba(0,229,255,.28); border-radius:12px; padding:12px; margin:0 0 18px}
+.a-cur h4{margin:0 0 10px; font-family:'Unbounded'; font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--n3)}
+.a-row2{display:flex; justify-content:space-between; gap:10px; font-size:11px; padding:3px 0; border-bottom:1px dashed rgba(255,255,255,.07)}
+.a-row2:last-child{border-bottom:0}
+.a-row2 span{color:#b39ccd}
+.a-row2 b{color:#fff; font-weight:600; text-align:right; word-break:break-all}
+.a-live{display:inline-block; padding:2px 8px; border-radius:100px; font-size:10px; letter-spacing:.06em}
+.a-live.ok{background:rgba(74,222,128,.16); color:#4ade80; border:1px solid rgba(74,222,128,.4)}
+.a-live.draft{background:rgba(255,43,209,.16); color:#ff8ce8; border:1px solid rgba(255,43,209,.45)}
+.a-chg{border-color:var(--n3)!important; box-shadow:0 0 0 2px rgba(0,229,255,.18)}
+.a-dot{display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--n3); margin-right:5px; vertical-align:middle}
