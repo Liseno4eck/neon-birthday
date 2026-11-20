@@ -1,20 +1,32 @@
 /* ============================================================
-   Heart-shaped QR: the QR matrix is fitted INSIDE a heart
-   silhouette (white background, dark modules), so the code
-   itself looks like a heart and still scans.
+   Heart-shaped pixel QR (reference style).
+   - the module grid is rotated 45 deg, so the three finder
+     patterns land at top / left / right of the heart
+   - everything is clipped to the heart silhouette, which gives
+     the jagged pixel edge
+   - pink modules on a white field (white bg is mandatory for
+     a scannable code)
+   - level H error correction (30 %) compensates for cropped data
    Depends on qrcode-generator (window.qrcode).
    ============================================================ */
 (function () {
   'use strict';
 
-  function heartPath(ctx, cx, cy, s) {
-    var t = s / 2;
+  var ANGLE = Math.PI / 4;          // 45 deg
+  var COS = Math.cos(ANGLE), SIN = Math.sin(ANGLE);
+
+  /* classic parametric heart, centred at (cx,cy), half-width hw */
+  function heartPath(ctx, cx, cy, hw) {
+    var hh = hw * (31 / 32);
     ctx.beginPath();
-    ctx.moveTo(cx, cy + t * 0.75);
-    ctx.bezierCurveTo(cx, cy + t * 0.35, cx - t, cy - t * 0.1, cx - t, cy - t * 0.5);
-    ctx.bezierCurveTo(cx - t, cy - t, cx - t * 0.45, cy - t, cx, cy - t * 0.45);
-    ctx.bezierCurveTo(cx + t * 0.45, cy - t, cx + t, cy - t, cx + t, cy - t * 0.5);
-    ctx.bezierCurveTo(cx + t, cy - t * 0.1, cx, cy + t * 0.35, cx, cy + t * 0.75);
+    for (var i = 0; i <= 720; i++) {
+      var t = (i / 720) * Math.PI * 2;
+      var x = 16 * Math.pow(Math.sin(t), 3);
+      var y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+      var px = cx + x * (hw / 16);
+      var py = cy - y * (hh / 16);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
     ctx.closePath();
   }
 
@@ -28,117 +40,156 @@
     ctx.closePath();
   }
 
+  /* grid space (u,v) -> screen space, rotated 45 deg about (cx,cy) */
+  function toScreen(cx, cy, u, v) {
+    return [cx + u * COS - v * SIN, cy + u * SIN + v * COS];
+  }
+
+  /* biggest rotated grid whose three finder boxes stay fully inside */
+  function fitGrid(inPath, cx, cy, hw, n) {
+    var hh = hw * (31 / 32);
+    var best = null;
+    var cyOffs = [-0.06, 0, 0.06, 0.12].map(function (f) { return cy + f * hh; });
+
+    cyOffs.forEach(function (cyTry) {
+      for (var L = hw * 2.05; L >= hw * 0.7; L -= 2) {
+        var cell = L / n;
+        var f = cell * 7;                      // finder box side
+        var h = L / 2;
+        // three finders sit at the TL / TR / BL corners of the grid
+        var corners = [
+          [-h, -h, 1, 1],    // TL -> top
+          [ h, -h, -1, 1],   // TR -> right
+          [-h,  h, 1, -1]    // BL -> left
+        ];
+        var ok = true;
+        for (var k = 0; k < corners.length && ok; k++) {
+          var o = corners[k];
+          var pts = [
+            [o[0], o[1]],
+            [o[0] + f * o[2], o[1]],
+            [o[0], o[1] + f * o[3]],
+            [o[0] + f * o[2], o[1] + f * o[3]]
+          ];
+          for (var j = 0; j < 4; j++) {
+            var s = toScreen(cx, cyTry, pts[j][0], pts[j][1]);
+            if (!inPath(s[0], s[1])) { ok = false; break; }
+          }
+        }
+        // and the free BR corner must not stick out of the tip
+        if (ok) {
+          var br = toScreen(cx, cyTry, h, h);
+          if (!inPath(br[0], br[1])) ok = false;
+        }
+        if (ok) {
+          if (!best || L > best.L) best = { L: L, cy: cyTry, cell: cell };
+          break;
+        }
+      }
+    });
+    return best;
+  }
+
   function isFinder(r, c, n) {
     return (r < 7 && c < 7) || (r < 7 && c >= n - 7) || (r >= n - 7 && c < 7);
-  }
-  function isTiming(r, c, n) {
-    return r === 6 || c === 6;
   }
 
   function siteUrl() {
     return location.origin + location.pathname.replace(/index.html$/, '');
   }
 
-  /* Draw heart-shaped QR into a canvas. Returns canvas. */
   function draw(opts) {
     var text = opts.text || siteUrl();
-    var accent = opts.accent || '#ff2bd1';
-    var accent2 = opts.accent2 || '#7b5cff';
-    var scale = opts.scale || 2;
+    var accent = opts.accent || '#e5188c';
 
-    var qr = window.qrcode(0, 'H');  // level H = 30% recovery, safe for cropping
+    var qr = window.qrcode(0, 'H');
     qr.addData(text);
     qr.make();
     var n = qr.getModuleCount();
 
-    // canvas: heart + caption
-    var heartSize = 340;   // heart bounding box width/height
-    var W = heartSize + 40;
-    var H = W + 70;        // caption area
+    var hw = 180;                       // heart half width (css px)
+    var hh = hw * (31 / 32);
+    var pad = 26;
+    var capH = 54;
+    var W = Math.round(hw * 2 + pad * 2);
     var cx = W / 2;
-    var cy = heartSize / 2 + 20;
+    var cy = pad + hh;
+    var H = Math.round(cy + hh + pad + capH);
 
+    var S = Math.min(3, (window.devicePixelRatio || 1) * 1.5);
     var cv = document.createElement('canvas');
-    cv.width = W * scale; cv.height = H * scale;
+    cv.width = Math.round(W * S); cv.height = Math.round(H * S);
     cv.style.width = W + 'px'; cv.style.height = H + 'px';
     var ctx = cv.getContext('2d');
-    ctx.scale(scale, scale);
+    ctx.scale(S, S);
 
-    // ---- outer glow heart (decorative) ----
+    var path = new Path2D();
+    for (var i = 0; i <= 720; i++) {
+      var t = (i / 720) * Math.PI * 2;
+      var hx = 16 * Math.pow(Math.sin(t), 3);
+      var hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+      var px = cx + hx * (hw / 16);
+      var py = cy - hy * (hh / 16);
+      if (i === 0) path.moveTo(px, py); else path.lineTo(px, py);
+    }
+    path.closePath();
+
+    var probe = document.createElement('canvas').getContext('2d');
+    probe.canvas.width = W; probe.canvas.height = H;
+    heartPath(probe, cx, cy, hw);
+    function inPath(x, y) { return probe.isPointInPath(x, y); }
+
+    var fit = fitGrid(inPath, cx, cy, hw, n);
+    if (!fit) throw new Error('heart too small for this link');
+    var cell = fit.cell;
+    var L = fit.L;
+
+    /* ---- white heart field ---- */
+    ctx.fillStyle = '#fffdf9';
+    ctx.fill(path);
+
+    /* ---- modules, clipped to the heart ---- */
     ctx.save();
-    ctx.shadowColor = accent; ctx.shadowBlur = 40;
-    heartPath(ctx, cx, cy, heartSize);
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
-    ctx.restore();
+    ctx.clip(path);
+    ctx.translate(cx, fit.cy);
+    ctx.rotate(ANGLE);
+    ctx.translate(-L / 2, -L / 2);
 
-    // ---- clip QR to heart shape ----
-    ctx.save();
-    heartPath(ctx, cx, cy, heartSize * 0.94);
-    ctx.clip();
-
-    // white background inside heart
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(cx - heartSize / 2, cy - heartSize / 2, heartSize, heartSize);
-
-    // QR matrix: center it, leave margins for heart curvature
-    // we draw a square QR but clip makes it heart-shaped
-    var cell = Math.floor(heartSize * 0.82 / n);
-    var qrSize = cell * n;
-    var ox = cx - qrSize / 2;
-    var oy = cy - qrSize / 2 - 5;  // slightly up to fill heart lobes
-
-    // dark modules as small hearts
-    var dark = '#2a0b3d';
+    ctx.fillStyle = accent;
     for (var r = 0; r < n; r++) {
       for (var c = 0; c < n; c++) {
         if (!qr.isDark(r, c)) continue;
-        var x = ox + c * cell;
-        var y = oy + r * cell;
-        if (isFinder(r, c, n)) {
-          // finder squares drawn strictly to keep scanner lock
-          ctx.fillStyle = dark;
-          ctx.fillRect(x, y, cell, cell);
-        } else if (isTiming(r, c, n)) {
-          ctx.fillStyle = dark;
-          ctx.fillRect(x, y, cell, cell);
-        } else {
-          // data modules as tiny hearts
-          ctx.fillStyle = dark;
-          heartPath(ctx, x + cell / 2, y + cell / 2, cell * 1.25);
-          ctx.fill();
-        }
+        ctx.fillRect(c * cell, r * cell, cell + 0.5, cell + 0.5);
       }
     }
+
+    /* finder patterns: 7x7 ring + 3x3 core, same pink as the rest */
+    var anchors = [[0, 0], [n - 7, 0], [0, n - 7]];
+    anchors.forEach(function (a) {
+      var x = a[1] * cell, y = a[0] * cell;
+      ctx.fillStyle = accent;
+      ctx.fillRect(x, y, cell * 7, cell * 7);
+      ctx.fillStyle = '#fffdf9';
+      ctx.fillRect(x + cell, y + cell, cell * 5, cell * 5);
+      ctx.fillStyle = accent;
+      ctx.fillRect(x + cell * 2, y + cell * 2, cell * 3, cell * 3);
+    });
+
     ctx.restore();
 
-    // ---- neon border heart on top ----
-    ctx.save();
-    var grad = ctx.createLinearGradient(cx - heartSize / 2, 0, cx + heartSize / 2, 0);
-    grad.addColorStop(0, accent);
-    grad.addColorStop(0.5, accent2);
-    grad.addColorStop(1, '#00e5ff');
-    heartPath(ctx, cx, cy, heartSize);
-    ctx.strokeStyle = grad;
-    ctx.lineWidth = 3;
-    ctx.shadowColor = accent; ctx.shadowBlur = 20;
-    ctx.stroke();
-    ctx.restore();
-
-    // ---- caption ----
+    /* ---- caption ---- */
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#2a0b3d';
+    ctx.fillStyle = '#3a0f2a';
     ctx.font = '600 13px Manrope, system-ui, sans-serif';
-    ctx.fillText('наведи камеру на сердечко', cx, cy + heartSize / 2 + 26);
-    ctx.fillStyle = '#8a6f9e';
+    ctx.fillText('наведи камеру на сердечко', W / 2, H - capH + 20);
+    ctx.fillStyle = '#a06a90';
     ctx.font = '400 11px Manrope, system-ui, sans-serif';
-    var url = text.length > 42 ? text.slice(0, 40) + '...' : text;
-    ctx.fillText(url, cx, cy + heartSize / 2 + 44);
+    var url = text.length > 44 ? text.slice(0, 42) + '…' : text;
+    ctx.fillText(url, W / 2, H - capH + 38);
 
     return cv;
   }
 
-  /* Build + show the modal. */
   function show(opts) {
     opts = opts || {};
     var old = document.getElementById('qrModal');
@@ -147,7 +198,7 @@
     var cv;
     try {
       if (!window.qrcode) throw new Error('qr-lib not loaded');
-      cv = draw({ text: opts.text, accent: opts.accent, accent2: opts.accent2 });
+      cv = draw({ text: opts.text, accent: opts.accent });
     } catch (e) {
       if (window.TOAST) window.TOAST('Не удалось построить QR: ' + e.message);
       return;
