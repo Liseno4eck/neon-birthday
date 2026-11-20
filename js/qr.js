@@ -15,29 +15,20 @@
   var ANGLE = Math.PI / 4;          // 45 deg
   var COS = Math.cos(ANGLE), SIN = Math.sin(ANGLE);
 
-  /* classic parametric heart, centred at (cx,cy), half-width hw */
-  function heartPath(ctx, cx, cy, hw) {
+  /* classic parametric heart as a Path2D, centred at (cx,cy), half-width hw */
+  function heartPath2D(cx, cy, hw) {
     var hh = hw * (31 / 32);
-    ctx.beginPath();
+    var p = new Path2D();
     for (var i = 0; i <= 720; i++) {
       var t = (i / 720) * Math.PI * 2;
       var x = 16 * Math.pow(Math.sin(t), 3);
       var y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
       var px = cx + x * (hw / 16);
       var py = cy - y * (hh / 16);
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      if (i === 0) p.moveTo(px, py); else p.lineTo(px, py);
     }
-    ctx.closePath();
-  }
-
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
+    p.closePath();
+    return p;
   }
 
   /* grid space (u,v) -> screen space, rotated 45 deg about (cx,cy) */
@@ -45,52 +36,18 @@
     return [cx + u * COS - v * SIN, cy + u * SIN + v * COS];
   }
 
-  /* biggest rotated grid whose three finder boxes stay fully inside.
-     The heart has a notch on top, so the grid centre is searched over a
-     wide vertical range; for every candidate centre we take the largest
-     grid that keeps all three finder squares (eroded a bit) inside. */
-  function fitGrid(inPathFull, inPathSafe, cx, cy, hw, n) {
+  /* A heart is a point at the bottom and has a notch on top, so no square
+     can ever sit fully inside it. A 45 deg rotated grid is the closest fit:
+     its free corner lands on the tip and the three finder corners land at
+     the top, left and right of the heart - exactly where there is room.
+     The grid is sized so it spans the heart body; whatever sticks out of
+     the silhouette is clipped away, which is what makes the pixel edge. */
+  function fitGrid(hw, n) {
     var hh = hw * (31 / 32);
-    var best = null;
-
-    for (var f = -0.45; f <= 0.45; f += 0.02) {
-      var cyTry = cy + f * hh;
-      for (var L = hw * 2.2; L >= hw * 0.6; L -= 1.5) {
-        var cell = L / n;
-        var side = cell * 7;                   // finder box side
-        var h = L / 2;
-        // finders sit at the TL / TR / BL corners of the grid
-        var corners = [
-          [-h, -h, 1, 1],    // TL -> top
-          [ h, -h, -1, 1],   // TR -> right
-          [-h,  h, 1, -1]    // BL -> left
-        ];
-        var ok = true;
-        for (var k = 0; k < corners.length && ok; k++) {
-          var o = corners[k];
-          var pts = [
-            [o[0], o[1]],
-            [o[0] + side * o[2], o[1]],
-            [o[0], o[1] + side * o[3]],
-            [o[0] + side * o[2], o[1] + side * o[3]]
-          ];
-          for (var j = 0; j < 4; j++) {
-            var s = toScreen(cx, cyTry, pts[j][0], pts[j][1]);
-            if (!inPathSafe(s[0], s[1])) { ok = false; break; }
-          }
-        }
-        // the free BR corner should not stick out of the tip either
-        if (ok) {
-          var br = toScreen(cx, cyTry, h, h);
-          if (!inPathFull(br[0], br[1])) ok = false;
-        }
-        if (ok) {
-          if (!best || L > best.L) best = { L: L, cy: cyTry, cell: cell };
-          break;
-        }
-      }
-    }
-    return best;
+    var D = hw * 0.82;              // half diagonal of the rotated grid
+    var h = D / Math.SQRT2;         // half side of the grid square
+    var L = h * 2;
+    return { L: L, cell: L / n, dy: hh * 0.15625 };
   }
 
   function isFinder(r, c, n) {
@@ -126,32 +83,15 @@
     var ctx = cv.getContext('2d');
     ctx.scale(S, S);
 
-    var path = new Path2D();
-    for (var i = 0; i <= 720; i++) {
-      var t = (i / 720) * Math.PI * 2;
-      var hx = 16 * Math.pow(Math.sin(t), 3);
-      var hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
-      var px = cx + hx * (hw / 16);
-      var py = cy - hy * (hh / 16);
-      if (i === 0) path.moveTo(px, py); else path.lineTo(px, py);
-    }
-    path.closePath();
+    var path = heartPath2D(cx, cy, hw);
+    /* slightly puffy heart used only for the finder patterns, so the three
+       corner squares stay readable instead of being shaved by the silhouette */
+    var puffy = heartPath2D(cx, cy + hw * 0.02, hw * 1.10);
 
-    var probe = document.createElement('canvas').getContext('2d');
-    probe.canvas.width = W; probe.canvas.height = H;
-    heartPath(probe, cx, cy, hw);
-    function inPathFull(x, y) { return probe.isPointInPath(x, y); }
-
-    // eroded heart: finder boxes must fit inside this to stay unclipped
-    var probe2 = document.createElement('canvas').getContext('2d');
-    probe2.canvas.width = W; probe2.canvas.height = H;
-    heartPath(probe2, cx, cy + hw * 0.012, hw * 0.965);
-    function inPathSafe(x, y) { return probe2.isPointInPath(x, y); }
-
-    var fit = fitGrid(inPathFull, inPathSafe, cx, cy, hw, n);
-    if (!fit) throw new Error('сердце слишком маленькое для этой ссылки');
+    var fit = fitGrid(hw, n);
     var cell = fit.cell;
     var L = fit.L;
+    var gridCy = cy + fit.dy;
 
     /* ---- white heart field ---- */
     ctx.fillStyle = '#fffdf9';
@@ -160,7 +100,7 @@
     /* ---- modules, clipped to the heart ---- */
     ctx.save();
     ctx.clip(path);
-    ctx.translate(cx, fit.cy);
+    ctx.translate(cx, gridCy);
     ctx.rotate(ANGLE);
     ctx.translate(-L / 2, -L / 2);
 
@@ -171,10 +111,15 @@
         ctx.fillRect(c * cell, r * cell, cell + 0.5, cell + 0.5);
       }
     }
+    ctx.restore();
 
-    /* finder patterns: 7x7 ring + 3x3 core, same pink as the rest */
-    var anchors = [[0, 0], [n - 7, 0], [0, n - 7]];
-    anchors.forEach(function (a) {
+    /* ---- finder patterns: 7x7 ring + 3x3 core, same pink as the rest ---- */
+    ctx.save();
+    ctx.clip(puffy);
+    ctx.translate(cx, gridCy);
+    ctx.rotate(ANGLE);
+    ctx.translate(-L / 2, -L / 2);
+    [[0, 0], [n - 7, 0], [0, n - 7]].forEach(function (a) {
       var x = a[1] * cell, y = a[0] * cell;
       ctx.fillStyle = accent;
       ctx.fillRect(x, y, cell * 7, cell * 7);
@@ -183,7 +128,6 @@
       ctx.fillStyle = accent;
       ctx.fillRect(x + cell * 2, y + cell * 2, cell * 3, cell * 3);
     });
-
     ctx.restore();
 
     /* ---- caption ---- */
@@ -260,4 +204,9 @@
   window.QR_SHOW = show;
   window.QR_CLOSE = close;
   window.SITE_URL = siteUrl;
+
+  /* open the QR straight from the address bar: site/#qr */
+  window.addEventListener('load', function () {
+    if (location.hash === '#qr') show();
+  });
 })();
