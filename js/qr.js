@@ -1,21 +1,20 @@
 /* ============================================================
-   Heart-styled QR renderer.
-   Draws the QR modules as small hearts on a white card so it
-   still scans reliably, and frames the whole thing in a heart.
+   Heart-shaped QR: the QR matrix is fitted INSIDE a heart
+   silhouette (white background, dark modules), so the code
+   itself looks like a heart and still scans.
    Depends on qrcode-generator (window.qrcode).
    ============================================================ */
 (function () {
   'use strict';
 
-  function heartPath(ctx, x, y, s) {
-    // heart centred at (x,y), size s
+  function heartPath(ctx, cx, cy, s) {
     var t = s / 2;
     ctx.beginPath();
-    ctx.moveTo(x, y + t * 0.75);
-    ctx.bezierCurveTo(x, y + t * 0.35, x - t, y - t * 0.1, x - t, y - t * 0.5);
-    ctx.bezierCurveTo(x - t, y - t, x - t * 0.45, y - t, x, y - t * 0.45);
-    ctx.bezierCurveTo(x + t * 0.45, y - t, x + t, y - t, x + t, y - t * 0.5);
-    ctx.bezierCurveTo(x + t, y - t * 0.1, x, y + t * 0.35, x, y + t * 0.75);
+    ctx.moveTo(cx, cy + t * 0.75);
+    ctx.bezierCurveTo(cx, cy + t * 0.35, cx - t, cy - t * 0.1, cx - t, cy - t * 0.5);
+    ctx.bezierCurveTo(cx - t, cy - t, cx - t * 0.45, cy - t, cx, cy - t * 0.45);
+    ctx.bezierCurveTo(cx + t * 0.45, cy - t, cx + t, cy - t, cx + t, cy - t * 0.5);
+    ctx.bezierCurveTo(cx + t, cy - t * 0.1, cx, cy + t * 0.35, cx, cy + t * 0.75);
     ctx.closePath();
   }
 
@@ -32,33 +31,32 @@
   function isFinder(r, c, n) {
     return (r < 7 && c < 7) || (r < 7 && c >= n - 7) || (r >= n - 7 && c < 7);
   }
-  function isQuiet(r, c, n) {
-    return (r < 9 && c < 9) || (r < 9 && c >= n - 9) || (r >= n - 9 && c < 9);
+  function isTiming(r, c, n) {
+    return r === 6 || c === 6;
   }
 
   function siteUrl() {
-    return location.origin + location.pathname.replace(/index\.html$/, '');
+    return location.origin + location.pathname.replace(/index.html$/, '');
   }
 
-  /* Draw QR for `text` into a canvas. Returns canvas. */
+  /* Draw heart-shaped QR into a canvas. Returns canvas. */
   function draw(opts) {
     var text = opts.text || siteUrl();
     var accent = opts.accent || '#ff2bd1';
     var accent2 = opts.accent2 || '#7b5cff';
     var scale = opts.scale || 2;
 
-    var qr = window.qrcode(0, 'Q');
+    var qr = window.qrcode(0, 'H');  // level H = 30% recovery, safe for cropping
     qr.addData(text);
     qr.make();
     var n = qr.getModuleCount();
 
-    var quiet = 2;                 // quiet zone in modules
-    var cell = 10;                 // module size in css px
-    var pad = 22;                  // white card padding
-    var capH = 46;                 // caption strip
-    var size = (n + quiet * 2) * cell;
-    var W = size + pad * 2;
-    var H = W + capH;
+    // canvas: heart + caption
+    var heartSize = 340;   // heart bounding box width/height
+    var W = heartSize + 40;
+    var H = W + 70;        // caption area
+    var cx = W / 2;
+    var cy = heartSize / 2 + 20;
 
     var cv = document.createElement('canvas');
     cv.width = W * scale; cv.height = H * scale;
@@ -66,63 +64,76 @@
     var ctx = cv.getContext('2d');
     ctx.scale(scale, scale);
 
-    // ---- outer heart frame ----
+    // ---- outer glow heart (decorative) ----
     ctx.save();
-    ctx.shadowColor = accent; ctx.shadowBlur = 26;
-    heartPath(ctx, W / 2, 16, Math.min(W, H) * 0.055);
-    ctx.fillStyle = accent; ctx.fill();
+    ctx.shadowColor = accent; ctx.shadowBlur = 40;
+    heartPath(ctx, cx, cy, heartSize);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
     ctx.restore();
 
-    // ---- white card (needed for reliable scanning) ----
+    // ---- clip QR to heart shape ----
+    ctx.save();
+    heartPath(ctx, cx, cy, heartSize * 0.94);
+    ctx.clip();
+
+    // white background inside heart
     ctx.fillStyle = '#ffffff';
-    roundRect(ctx, 0, 30, W, W, 20); ctx.fill();
-    ctx.strokeStyle = accent; ctx.lineWidth = 2;
-    roundRect(ctx, 1, 31, W - 2, W - 2, 19); ctx.stroke();
+    ctx.fillRect(cx - heartSize / 2, cy - heartSize / 2, heartSize, heartSize);
 
-    ctx.translate(pad, 30 + pad);
+    // QR matrix: center it, leave margins for heart curvature
+    // we draw a square QR but clip makes it heart-shaped
+    var cell = Math.floor(heartSize * 0.82 / n);
+    var qrSize = cell * n;
+    var ox = cx - qrSize / 2;
+    var oy = cy - qrSize / 2 - 5;  // slightly up to fill heart lobes
 
-    // ---- modules ----
-    var grad = ctx.createLinearGradient(0, 0, size, size);
-    grad.addColorStop(0, accent);
-    grad.addColorStop(1, accent2);
-    ctx.fillStyle = grad;
-
+    // dark modules as small hearts
     var dark = '#2a0b3d';
     for (var r = 0; r < n; r++) {
       for (var c = 0; c < n; c++) {
         if (!qr.isDark(r, c)) continue;
-        if (isQuiet(r, c, n)) continue;      // keep finder surroundings clean
-        var x = (c + quiet) * cell, y = (r + quiet) * cell;
-        if (isFinder(r, c, n)) continue;     // finders drawn separately
-        heartPath(ctx, x + cell / 2, y + cell / 2, cell * 1.06);
-        ctx.fill();
+        var x = ox + c * cell;
+        var y = oy + r * cell;
+        if (isFinder(r, c, n)) {
+          // finder squares drawn strictly to keep scanner lock
+          ctx.fillStyle = dark;
+          ctx.fillRect(x, y, cell, cell);
+        } else if (isTiming(r, c, n)) {
+          ctx.fillStyle = dark;
+          ctx.fillRect(x, y, cell, cell);
+        } else {
+          // data modules as tiny hearts
+          ctx.fillStyle = dark;
+          heartPath(ctx, x + cell / 2, y + cell / 2, cell * 1.25);
+          ctx.fill();
+        }
       }
     }
+    ctx.restore();
 
-    // ---- finder patterns: rounded squares + heart in the middle ----
-    ctx.fillStyle = dark;
-    var anchors = [[0, 0], [n - 7, 0], [0, n - 7]];
-    anchors.forEach(function (a) {
-      var x = (a[1] + quiet) * cell, y = (a[0] + quiet) * cell;
-      roundRect(ctx, x, y, cell * 7, cell * 7, cell * 2.2); ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      roundRect(ctx, x + cell, y + cell, cell * 5, cell * 5, cell * 1.6); ctx.fill();
-      ctx.fillStyle = grad;
-      heartPath(ctx, x + cell * 3.5, y + cell * 3.5, cell * 3.2); ctx.fill();
-      ctx.fillStyle = dark;
-    });
-
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    // ---- neon border heart on top ----
+    ctx.save();
+    var grad = ctx.createLinearGradient(cx - heartSize / 2, 0, cx + heartSize / 2, 0);
+    grad.addColorStop(0, accent);
+    grad.addColorStop(0.5, accent2);
+    grad.addColorStop(1, '#00e5ff');
+    heartPath(ctx, cx, cy, heartSize);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = accent; ctx.shadowBlur = 20;
+    ctx.stroke();
+    ctx.restore();
 
     // ---- caption ----
     ctx.textAlign = 'center';
-    ctx.fillStyle = dark;
+    ctx.fillStyle = '#2a0b3d';
     ctx.font = '600 13px Manrope, system-ui, sans-serif';
-    ctx.fillText('наведи камеру', W / 2, 30 + W + 20);
+    ctx.fillText('наведи камеру на сердечко', cx, cy + heartSize / 2 + 26);
     ctx.fillStyle = '#8a6f9e';
     ctx.font = '400 11px Manrope, system-ui, sans-serif';
     var url = text.length > 42 ? text.slice(0, 40) + '...' : text;
-    ctx.fillText(url, W / 2, 30 + W + 37);
+    ctx.fillText(url, cx, cy + heartSize / 2 + 44);
 
     return cv;
   }
@@ -147,6 +158,7 @@
     t.innerHTML =
       '<div class="qr-card">' +
         '<button class="qr-x" id="qrClose" aria-label="Закрыть">&#10005;</button>' +
+        '<b>Отсканируй сердечко</b>' +
         '<div class="qr-canvas" id="qrHolder"></div>' +
         '<div class="qr-url" id="qrUrl"></div>' +
         '<div class="qr-actions">' +
@@ -156,16 +168,16 @@
       '</div>';
     document.body.appendChild(t);
 
+    function $(s) { return t.querySelector(s); }
     $('#qrHolder').appendChild(cv);
     $('#qrUrl').textContent = opts.text || siteUrl();
 
-    function $(s) { return t.querySelector(s); }
     $('#qrClose').onclick = close;
     t.addEventListener('click', function (e) { if (e.target === t) close(); });
     $('#qrPng').onclick = function () {
       var a = document.createElement('a');
       a.href = cv.toDataURL('image/png');
-      a.download = 'birthday-qr.png';
+      a.download = 'birthday-heart-qr.png';
       a.click();
     };
     $('#qrCopy').onclick = function () {
