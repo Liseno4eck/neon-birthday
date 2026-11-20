@@ -161,7 +161,7 @@
   function render() {
     applyTheme();
     $$('[data-bind]').forEach(function (el) { el.textContent = get(el.dataset.bind) || ''; });
-    $('#dateInput').placeholder = 'ддмм';
+    $('#dateInput').placeholder = 'дд.мм';
 
     // letter photos slider
     var lPhotos = (cfg.letter && cfg.letter.photos) || [];
@@ -365,10 +365,13 @@
     input.addEventListener('input', function () {
       input.classList.remove('bad');
       err.textContent = '';
+      // live mask: "2212" -> "22.12", "22" stays "22", backspace works too
+      var digits = input.value.replace(/\D/g, '').slice(0, 4);
+      input.value = digits.length > 2 ? digits.slice(0, 2) + '.' + digits.slice(2) : digits;
       // secret can also be typed straight into the date field
       var flat = input.value.trim().toLowerCase();
       var sec = String(cfg.secret || DEFAULTS.secret).toLowerCase();
-      if (sec && flat === sec) {
+      if (sec && (flat === sec || digits === sec)) {
         input.value = '';
         keyBuf = '';
         if (window.openAdmin) window.openAdmin();
@@ -378,7 +381,7 @@
       e.preventDefault();
       var flat = input.value.trim().toLowerCase();
       var sec = String(cfg.secret || DEFAULTS.secret).toLowerCase();
-      if (sec && flat === sec) {
+      if (sec && (flat === sec || input.value.replace(/\D/g, '') === sec)) {
         input.value = '';
         keyBuf = '';
         if (window.openAdmin) window.openAdmin();
