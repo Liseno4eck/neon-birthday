@@ -45,18 +45,21 @@
     return [cx + u * COS - v * SIN, cy + u * SIN + v * COS];
   }
 
-  /* biggest rotated grid whose three finder boxes stay fully inside */
-  function fitGrid(inPath, cx, cy, hw, n) {
+  /* biggest rotated grid whose three finder boxes stay fully inside.
+     The heart has a notch on top, so the grid centre is searched over a
+     wide vertical range; for every candidate centre we take the largest
+     grid that keeps all three finder squares (eroded a bit) inside. */
+  function fitGrid(inPathFull, inPathSafe, cx, cy, hw, n) {
     var hh = hw * (31 / 32);
     var best = null;
-    var cyOffs = [-0.06, 0, 0.06, 0.12].map(function (f) { return cy + f * hh; });
 
-    cyOffs.forEach(function (cyTry) {
-      for (var L = hw * 2.05; L >= hw * 0.7; L -= 2) {
+    for (var f = -0.45; f <= 0.45; f += 0.02) {
+      var cyTry = cy + f * hh;
+      for (var L = hw * 2.2; L >= hw * 0.6; L -= 1.5) {
         var cell = L / n;
-        var f = cell * 7;                      // finder box side
+        var side = cell * 7;                   // finder box side
         var h = L / 2;
-        // three finders sit at the TL / TR / BL corners of the grid
+        // finders sit at the TL / TR / BL corners of the grid
         var corners = [
           [-h, -h, 1, 1],    // TL -> top
           [ h, -h, -1, 1],   // TR -> right
@@ -67,26 +70,26 @@
           var o = corners[k];
           var pts = [
             [o[0], o[1]],
-            [o[0] + f * o[2], o[1]],
-            [o[0], o[1] + f * o[3]],
-            [o[0] + f * o[2], o[1] + f * o[3]]
+            [o[0] + side * o[2], o[1]],
+            [o[0], o[1] + side * o[3]],
+            [o[0] + side * o[2], o[1] + side * o[3]]
           ];
           for (var j = 0; j < 4; j++) {
             var s = toScreen(cx, cyTry, pts[j][0], pts[j][1]);
-            if (!inPath(s[0], s[1])) { ok = false; break; }
+            if (!inPathSafe(s[0], s[1])) { ok = false; break; }
           }
         }
-        // and the free BR corner must not stick out of the tip
+        // the free BR corner should not stick out of the tip either
         if (ok) {
           var br = toScreen(cx, cyTry, h, h);
-          if (!inPath(br[0], br[1])) ok = false;
+          if (!inPathFull(br[0], br[1])) ok = false;
         }
         if (ok) {
           if (!best || L > best.L) best = { L: L, cy: cyTry, cell: cell };
           break;
         }
       }
-    });
+    }
     return best;
   }
 
@@ -107,7 +110,7 @@
     qr.make();
     var n = qr.getModuleCount();
 
-    var hw = 180;                       // heart half width (css px)
+    var hw = 200;                       // heart half width (css px)
     var hh = hw * (31 / 32);
     var pad = 26;
     var capH = 54;
@@ -137,10 +140,16 @@
     var probe = document.createElement('canvas').getContext('2d');
     probe.canvas.width = W; probe.canvas.height = H;
     heartPath(probe, cx, cy, hw);
-    function inPath(x, y) { return probe.isPointInPath(x, y); }
+    function inPathFull(x, y) { return probe.isPointInPath(x, y); }
 
-    var fit = fitGrid(inPath, cx, cy, hw, n);
-    if (!fit) throw new Error('heart too small for this link');
+    // eroded heart: finder boxes must fit inside this to stay unclipped
+    var probe2 = document.createElement('canvas').getContext('2d');
+    probe2.canvas.width = W; probe2.canvas.height = H;
+    heartPath(probe2, cx, cy + hw * 0.012, hw * 0.965);
+    function inPathSafe(x, y) { return probe2.isPointInPath(x, y); }
+
+    var fit = fitGrid(inPathFull, inPathSafe, cx, cy, hw, n);
+    if (!fit) throw new Error('сердце слишком маленькое для этой ссылки');
     var cell = fit.cell;
     var L = fit.L;
 
