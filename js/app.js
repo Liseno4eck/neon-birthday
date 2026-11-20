@@ -15,6 +15,7 @@
 
   var DEFAULTS = {
     secret: '1234',
+    qrCommand: 'adm',
     birthday: '19.11',
     theme: { n1: '#ff2bd1', n2: '#7b5cff', n3: '#00e5ff', bg: '#07000f', hearts: true },
     intro: {
@@ -299,20 +300,40 @@
   }
   window.BURST = burst;
 
-  /* ---------- secret combo ---------- */
+  /* ---------- secret combo & commands ---------- */
   function checkSecret() {
-    var s = (cfg.secret || DEFAULTS.secret).toLowerCase();
+    var s = String(cfg.secret || DEFAULTS.secret).toLowerCase();
     if (s && keyBuf.length >= s.length && keyBuf.slice(-s.length) === s) {
       keyBuf = '';
       if (window.openAdmin) window.openAdmin();
     }
   }
+  // typing the qr command (default "adm") shows a heart-shaped QR of the site address
+  function checkQrCommand() {
+    var cmd = String(cfg.qrCommand || DEFAULTS.qrCommand).toLowerCase();
+    if (!cmd) return false;
+    var tail = keyBuf.slice(-cmd.length);
+    if (keyBuf.length >= cmd.length && tail === cmd) {
+      var after = keyBuf.slice(-cmd.length - 1, -cmd.length);
+      if (after && /[a-z0-9]/.test(after)) return false;   // must be a whole word
+      keyBuf = '';
+      if (window.QR_SHOW) window.QR_SHOW();
+      else window.TOAST('QR-модуль не загрузился');
+      return true;
+    }
+    return false;
+  }
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && window.closeAdmin) { window.closeAdmin(); return; }
+    if (e.key === 'Escape') {
+      if (window.QR_CLOSE) window.QR_CLOSE();
+      if (window.closeAdmin) window.closeAdmin();
+      return;
+    }
     if (!e.key || e.key.length !== 1) return;
     var tag = (document.activeElement && document.activeElement.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     keyBuf = (keyBuf + e.key.toLowerCase()).slice(-40);
+    if (checkQrCommand()) return;
     checkSecret();
   });
 
