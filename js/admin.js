@@ -10,6 +10,8 @@
   var API = 'https://api.github.com';
   var LS = { tok: 'bd.tok', draft: 'bd.draft', sha: 'bd.sha' };
   var el = {}, sha = null, ready = false;
+  var published = null;      // last settings visitors actually see
+  var publishedAt = '';      // when they were published
 
   function $(s, r) { return (r || document).querySelector(s); }
   function esc(s) {
@@ -63,6 +65,9 @@
     '<div class="a-head"><b>ADMIN</b><span class="a-state" id="aState">черновик</span>' +
       '<button class="a-x" id="aClose" title="Закрыть (Esc)">&#10005;</button></div>' +
     '<div class="a-body">' +
+      '<section class="a-cur" id="aCur"><h4>Действующие настройки сайта</h4>' +
+        '<div class="a-row2"><span>адрес</span><b>' + esc(location.origin + location.pathname.replace(/index\.html$/, '')) + '</b></div>' +
+        '<div class="a-mini">загружаю опубликованную версию...</div></section>' +
       sec('Подключение',
         '<label class="a-fld"><span>GitHub token (Contents: Read and write для ' + esc(window.STORE.owner + '/' + window.STORE.repo) + ')</span>' +
         '<input id="aTok" type="password" placeholder="github_pat_..."></label>' +
@@ -86,6 +91,8 @@
       sec('Секрет и фон',
         '<label class="a-fld"><span>Секретная комбинация (вводится на экране с датой)</span>' +
         '<input data-f="secret" value="' + esc(get('secret')) + '"></label>' +
+        '<label class="a-fld"><span>Команда для QR-кода (вводится на странице)</span>' +
+        '<input data-f="qrCommand" value="' + esc(get('qrCommand')) + '"></label>' +
         '<div class="a-grid4">' +
         '<label class="a-fld"><span>Неон 1</span><input type="color" data-f="theme.n1" value="' + esc(get('theme.n1')) + '"></label>' +
         '<label class="a-fld"><span>Неон 2</span><input type="color" data-f="theme.n2" value="' + esc(get('theme.n2')) + '"></label>' +
@@ -95,8 +102,113 @@
       sec('Сохранение',
         '<div class="a-row"><button class="a-btn a-main" id="aSave">Опубликовать для всех</button>' +
         '<button class="a-btn" id="aReload">Отменить черновик</button></div>' +
+        '<div class="a-row"><button class="a-btn" id="aQr">Показать QR-код</button>' +
+        '<button class="a-btn" id="aRefresh">Обновить действующие</button></div>' +
         '<p class="a-mini">Опубликованное сразу видно всем посетителям. Без токена изменения живут только в этом браузере.</p>') +
     '</div>';
+  }
+
+  /* ---------- current (published) settings panel ---------- */
+  function siteUrl() { return location.origin + location.pathname.replace(/index\.html$/, ''); }
+
+  function row(label, val) {
+    return '<div class="a-row2"><span>' + label + '</span><b>' + val + '</b></div>';
+  }
+  function shortTxt(s, n) {
+    s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    n = n || 28;
+    return esc(s.length > n ? s.slice(0, n - 1) + '…' : s);
+  }
+  function swatch(c) {
+    return '<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:' + esc(c) + ';margin-left:5px;vertical-align:middle"></span>';
+  }
+
+  function renderCurrent() {
+    var box = $('#aCur');
+    if (!box) return;
+    var cur = window.CFG() || {};
+    var pub = published || {};
+    var diff = changedCount(pub, cur);
+
+    var head = '<h4>Действующие настройки сайта</h4>' +
+      '<div class="a-row2"><span>адрес</span><b>' + esc(siteUrl()) + '</b></div>';
+
+    if (!published) {
+      box.innerHTML = head + '<div class="a-mini">опубликованная версия не найдена — сайт показывает встроенные значения по умолчанию</div>';
+      return;
+    }
+
+    var lp = (pub.letter && pub.letter.photos) || [];
+    if (pub.letter && pub.letter.photo && !lp.length) lp = [pub.letter.photo];
+    var fp = (pub.final && pub.final.photos) || [];
+
+    var html = head +
+      '<div class="a-row2"><span>состояние</span><b>' +
+        (diff ? '<span class="a-live draft">черновик: изменено полей — ' + diff + '</span>'
+              : '<span class="a-live ok">совпадает с опубликованным</span>') + '</b></div>' +
+      (publishedAt ? row('опубликовано', esc(publishedAt)) : '') +
+      row('дата ДР', '<b>' + shortTxt(pub.birthday, 8) + '</b>') +
+      row('секрет / QR-команда', esc(shortTxt(pub.secret, 10)) + ' / ' + esc(shortTxt(pub.qrCommand, 10))) +
+      row('экран 1', shortTxt(pub.intro && pub.intro.title) + ' — ' + shortTxt(pub.intro && pub.intro.text, 22)) +
+      row('экран 2', shortTxt(pub.check && pub.check.title) + ' — ' + shortTxt(pub.check && pub.check.text, 22)) +
+      row('экран 3', shortTxt(pub.date && pub.date.title)) +
+      row('письмо', shortTxt(pub.letter && pub.letter.title) + ', фото: ' + lp.length) +
+      row('финал', shortTxt(pub.final && pub.final.title) + ', фото: ' + fp.length +
+        ', интервал ' + ((pub.final && pub.final.interval) || 2500) + ' мс') +
+      row('цвета', esc(pub.theme && pub.theme.n1) + swatch(pub.theme && pub.theme.n1) +
+        esc(pub.theme && pub.theme.n3) + swatch(pub.theme && pub.theme.n3) +
+        (pub.theme && pub.theme.hearts ? ' <span class="a-dot"></span>сердца' : ' без сердец')) +
+      '<div class="a-row" style="margin-top:8px"><button class="a-btn" id="aCopyJson">Скопировать JSON</button>' +
+      '<button class="a-btn" id="aUsePublished">Отменить все правки</button></div>';
+
+    box.innerHTML = html;
+
+    var cp = $('#aCopyJson', box);
+    if (cp) cp.onclick = function () {
+      var txt = JSON.stringify(published, null, 2);
+      if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () { window.TOAST('JSON скопирован'); });
+    };
+    var up = $('#aUsePublished', box);
+    if (up) up.onclick = function () {
+      localStorage.removeItem(LS.draft);
+      window.SET_CFG(published);
+      bindInputs(); renderPhotos();
+      state('загружена опубликованная версия', true);
+      renderCurrent();
+    };
+  }
+
+  function changedCount(a, b) {
+    var n = 0;
+    (function walk(x, y, path) {
+      Object.keys(y || {}).forEach(function (k) {
+        var v = y[k], w = x ? x[k] : undefined;
+        var p = path ? path + '.' + k : k;
+        if (v && typeof v === 'object' && !Array.isArray(v)) { walk(w, v, p); }
+        else {
+          var sv = JSON.stringify(v), sw = JSON.stringify(w);
+          if (sv !== sw) n++;
+        }
+      });
+    })(a, b, '');
+    return n;
+  }
+
+  function fetchPublished() {
+    fetch(window.RAW_URL(window.STORE.path) + '?t=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j) { published = j; renderCurrent(); } else renderCurrent(); })
+      .catch(function () { renderCurrent(); });
+    if (tok()) {
+      gh('/repos/' + window.STORE.owner + '/' + window.STORE.repo + '/commits?path=' + window.STORE.path + '&per_page=1')
+        .then(function (list) {
+          if (list && list[0] && list[0].commit) {
+            var d = new Date(list[0].commit.author.date);
+            publishedAt = d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            renderCurrent();
+          }
+        }).catch(function () {});
+    }
   }
 
   /* ---------- styles ---------- */
@@ -158,6 +270,7 @@
     try { localStorage.setItem(LS.draft, JSON.stringify(window.CFG())); } catch (e) {
       state('черновик не влез (слишком большие фото)');
     }
+    renderCurrent();
   }
   function publish() {
     if (!tok()) { window.TOAST('Сначала вставь GitHub token'); return; }
@@ -174,7 +287,10 @@
         sha = r && r.content && r.content.sha;
         localStorage.setItem(LS.sha, sha || '');
         localStorage.removeItem(LS.draft);
+        published = JSON.parse(JSON.stringify(window.CFG()));
+        publishedAt = new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
         state('опубликовано', true);
+        renderCurrent();
         window.TOAST('Сохранено — теперь это видят все');
       })
       .catch(function (e) { state('ошибка сохранения'); window.TOAST('Не удалось: ' + e.message); });
@@ -192,6 +308,8 @@
         window.SET_CFG(remote);
         bindInputs(); renderPhotos();
         state('актуально', true);
+        published = remote;
+        renderCurrent();
       });
   }
 
@@ -337,6 +455,14 @@
       }).then(function () { window.TOAST('Токен принят, контент загружен'); })
         .catch(function (e) { state('ошибка'); $('#aWho', el.root).textContent = e.message; });
     };
+    $('#aQr', el.root).onclick = function () {
+      if (window.QR_SHOW) window.QR_SHOW();
+      else window.TOAST('QR-модуль не загружен');
+    };
+    $('#aRefresh', el.root).onclick = function () {
+      fetchPublished();
+      window.TOAST('Действующие настройки обновлены');
+    };
     $('#aTok', el.root).value = tok();
     $('#aWho', el.root).textContent = tok() ? 'токен сохранён в этом браузере' : 'токен не задан';
 
@@ -375,6 +501,8 @@
         .then(function () { state('готово — не забудь Опубликовать'); window.TOAST('Фото письма добавлены'); })
         .catch(function (err) { state('ошибка'); window.TOAST(err.message); });
     };
+
+    fetchPublished();
   }
 
   function open() { init(); if (!el.root) return; el.root.hidden = false; }
@@ -388,6 +516,7 @@
     var draft = null;
     try { draft = localStorage.getItem(LS.draft); } catch (e) {}
     if (!draft) { bindInputs(); renderPhotos(); state('актуально', true); }
+    fetchPublished();
   };
   init();
 })();
