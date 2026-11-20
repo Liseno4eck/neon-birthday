@@ -339,7 +339,7 @@
 
   /* ---------- flow ---------- */
   function normDate(v) {
-    var s = String(v).trim().replace(/[-\s]/g, '');
+    var s = String(v).trim().replace(/[.\-\/\s]/g, '');
     var m = s.match(/^(\d{1,2})(\d{1,2})$/);
     if (!m) return null;
     var d = parseInt(m[1], 10), mo = parseInt(m[2], 10);
