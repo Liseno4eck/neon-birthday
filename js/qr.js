@@ -1,70 +1,75 @@
 /* ============================================================
-   Heart-shaped QR (reference style).
-   - a compact QR code is drawn WHOLE in the middle of the heart,
-     tilted by a small angle so every scanner can still read it
-   - a white plate under it keeps the mandatory quiet zone free,
-     which is what actually makes the code scannable
-   - the rest of the heart is filled with random pink modules in
-     the same pixel style (decoration only, kept away from the
-     quiet zone)
-   - level H error correction, pink on white
+   Heart-shaped pixel QR, reference style:
+   - fat rounded heart (two circles + triangle), almost square
+   - module grid rotated 45 deg: the three finder patterns sit in
+     the notch / left / right thick parts, the free corner aims
+     at the tip; everything is clipped by the silhouette, which
+     gives the jagged pixel edge
+   - grid size and vertical placement are searched numerically so
+     that all three finder squares stay >= 92 % visible
+   - level H (30 %) error correction makes the cropped code
+     scannable; pink modules on white
    Depends on qrcode-generator (window.qrcode).
    ============================================================ */
 (function () {
   'use strict';
 
-  var DEG = Math.PI / 180;
-  var TILT = -12;                   // degrees: tilted look, still scannable
+  var ANGLE = Math.PI / 4;
+  var COS = Math.cos(ANGLE), SIN = Math.sin(ANGLE);
 
-  /* classic parametric heart as a Path2D, centred at (cx,cy), half-width hw */
-  function heartPath2D(cx, cy, hw) {
-    var hh = hw * (31 / 32);
+  /* fat heart: two circles for the lobes + triangle down to the tip */
+  function buildHeart(cx, topY, hw) {
+    var r = hw * 0.55;
+    var lobeY = topY + r;
+    var tipY = topY + hw * 1.95;
     var p = new Path2D();
-    for (var i = 0; i <= 720; i++) {
-      var t = (i / 720) * Math.PI * 2;
-      var x = 16 * Math.pow(Math.sin(t), 3);
-      var y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
-      var px = cx + x * (hw / 16);
-      var py = cy - y * (hh / 16);
-      if (i === 0) p.moveTo(px, py); else p.lineTo(px, py);
-    }
+    p.arc(cx - hw * 0.45, lobeY, r, 0, Math.PI * 2);
+    p.arc(cx + hw * 0.45, lobeY, r, 0, Math.PI * 2);
+    p.moveTo(cx - hw, lobeY);
+    p.lineTo(cx, tipY);
+    p.lineTo(cx + hw, lobeY);
     p.closePath();
-    return p;
+    return { path: p, topY: topY, lobeY: lobeY, tipY: tipY, hw: hw, cx: cx };
   }
 
-  /* deterministic pseudo random, so the decoration is stable between redraws */
-  function rng(seed) {
-    var s = seed >>> 0;
-    return function () {
-      s = (s + 0x6D2B79F5) >>> 0;
-      var t = Math.imul(s ^ (s >>> 15), 1 | s);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+  /* grid coords (u,v) relative to grid centre -> screen coords */
+  function toScreen(cx, gy, u, v) {
+    return [cx + u * COS - v * SIN, gy + u * SIN + v * COS];
   }
 
-  /* biggest tilted square plate that still fits inside the heart.
-     The heart is pinched on top (notch) and ends in a tip below, so the
-     plate centre is searched over a vertical range. */
-  function fitPlate(inPath, cx, cy, hw, tilt) {
-    var hh = hw * (31 / 32);
-    var co = Math.cos(tilt), si = Math.sin(tilt);
-    var best = 0, bestCy = cy;
-    for (var f = -0.06; f <= 0.30; f += 0.02) {
-      var y = cy + f * hh;
-      for (var S = hw * 2; S >= hw * 0.5; S -= 2) {
-        var h = S / 2;
-        var pts = [[-h, -h], [h, -h], [h, h], [-h, h]];
+  /* Largest rotated grid whose three finder squares stay visible.
+     Returns { D: half-diagonal, gy: grid centre y } or null. */
+  function fitGrid(inPath, heart, n) {
+    for (var D = heart.hw * 1.2; D >= heart.hw * 0.5; D -= 2) {
+      var side = D * Math.SQRT2;          // grid square side
+      var cell = side / n;
+      var f = cell * 7;                    // finder square side
+      var half = side / 2;
+      // finders in grid space: [u0, v0] = top-left corner of the 7x7 block
+      var finders = [
+        [-half, -half],          // TL -> top vertex (notch)
+        [ half - f, -half],      // TR -> right vertex
+        [-half,  half - f]       // BL -> left vertex
+      ];
+      for (var gy = heart.topY + D * 0.15; gy <= heart.tipY - D * 0.85; gy += 3) {
         var ok = true;
-        for (var k = 0; k < 4; k++) {
-          var px = cx + pts[k][0] * co - pts[k][1] * si;
-          var py = y + pts[k][0] * si + pts[k][1] * co;
-          if (!inPath(px, py)) { ok = false; break; }
+        for (var k = 0; k < 3 && ok; k++) {
+          var hits = 0, total = 0;
+          for (var i = 0; i <= 6; i++) {
+            for (var j = 0; j <= 6; j++) {
+              var s = toScreen(heart.cx, gy,
+                finders[k][0] + f * i / 6,
+                finders[k][1] + f * j / 6);
+              if (inPath(s[0], s[1])) hits++;
+              total++;
+            }
+          }
+          if (hits / total < 0.92) ok = false;
         }
-        if (ok) { if (S > best) { best = S; bestCy = y; } break; }
+        if (ok) return { D: D, gy: gy };
       }
     }
-    return { size: best, cy: bestCy };
+    return null;
   }
 
   function siteUrl() {
@@ -75,22 +80,17 @@
     var text = opts.text || siteUrl();
     var accent = opts.accent || '#e5188c';
 
-    /* The symbol is drawn whole now, so heavy error correction is not
-       needed. Lower level => smaller version => bigger modules => the
-       phone camera locks on much faster. */
-    var qr = window.qrcode(0, 'M');
+    var qr = window.qrcode(0, 'H');
     qr.addData(text);
     qr.make();
     var n = qr.getModuleCount();
 
-    var hw = 200;                       // heart half width (css px)
-    var hh = hw * (31 / 32);
-    var pad = 26;
-    var capH = 54;
+    var hw = 200;
+    var pad = 24;
     var W = Math.round(hw * 2 + pad * 2);
+    var H = Math.round(hw * 1.95 + pad * 2);
     var cx = W / 2;
-    var cy = pad + hh;
-    var H = Math.round(cy + hh + pad + capH);
+    var topY = pad;
 
     var S = Math.min(3, (window.devicePixelRatio || 1) * 1.5);
     var cv = document.createElement('canvas');
@@ -99,78 +99,35 @@
     var ctx = cv.getContext('2d');
     ctx.scale(S, S);
 
-    var path = heartPath2D(cx, cy, hw);
+    var heart = buildHeart(cx, topY, hw);
+
     var probe = document.createElement('canvas').getContext('2d');
     probe.canvas.width = W; probe.canvas.height = H;
-    function inPath(x, y) { return probe.isPointInPath(path, x, y); }
+    function inPath(x, y) { return probe.isPointInPath(heart.path, x, y); }
 
-    /* ---- tilted plate that fits inside the heart ---- */
-    var PLATE_TILT = TILT * DEG;
-    var fit = fitPlate(inPath, cx, cy, hw, PLATE_TILT);
-    var maxPlate = fit.size;
-    var plateSize = Math.min(maxPlate, hw * 0.95);    // keep it "small"
-    if (plateSize < hw * 0.5) throw new Error('сердце слишком маленькое для QR');
-    var plateCy = fit.cy;
+    var fit = fitGrid(inPath, heart, n);
+    if (!fit) throw new Error('Не удалось подобрать сетку под сердце');
 
-    /* ---- white heart field ---- */
+    /* white heart field */
     ctx.fillStyle = '#fffdf9';
-    ctx.fill(path);
+    ctx.fill(heart.path);
 
-    /* ---- decoration: random pink modules in the empty parts of the heart ---- */
-    var RND_CELL = 9;
-    var halfW = W / 2, halfH = H / 2;
-    var rnd = rng(Math.round(hw * 1000));
+    /* modules clipped to the heart */
     ctx.save();
-    ctx.clip(path);
-    for (var dy = -halfH; dy < halfH; dy += RND_CELL) {
-      for (var dx = -halfW; dx < halfW; dx += RND_CELL) {
-        var sx = cx + dx, sy = cy + dy;
-        if (!inPath(sx, sy)) continue;
-        /* skip if inside or close to the plate (keep quiet zone clear) */
-        var ddx = dx, ddy = dy - (plateCy - cy);
-        var rdx =  ddx * Math.cos(-PLATE_TILT) - ddy * Math.sin(-PLATE_TILT);
-        var rdy =  ddx * Math.sin(-PLATE_TILT) + ddy * Math.cos(-PLATE_TILT);
-        if (Math.abs(rdx) < plateSize * 0.72 && Math.abs(rdy) < plateSize * 0.72) continue;
-        if (rnd() > 0.36) continue;
-        ctx.fillStyle = accent;
-        ctx.fillRect(sx - RND_CELL / 2, sy - RND_CELL / 2, RND_CELL, RND_CELL);
-      }
-    }
-    ctx.restore();
-
-    /* ---- QR on white plate, tilted ---- */
-    ctx.save();
-    ctx.translate(cx, plateCy);
-    ctx.rotate(PLATE_TILT);
-
-    /* white plate background */
-    ctx.fillStyle = '#fffdf9';
-    var pH = plateSize / 2;
-    ctx.fillRect(-pH, -pH, plateSize, plateSize);
-
-    /* QR modules. 1/10 of the plate side on each margin = 4+ modules of
-       quiet zone, which the spec requires around the symbol. */
-    var QR = Math.min(plateSize / 1.25, 190);
-    var cell = QR / n;
+    ctx.clip(heart.path);
+    ctx.translate(cx, fit.gy);
+    ctx.rotate(ANGLE);
+    var side = fit.D * Math.SQRT2;
+    var cell = side / n;
+    var half = side / 2;
+    ctx.fillStyle = accent;
     for (var r = 0; r < n; r++) {
       for (var c = 0; c < n; c++) {
         if (!qr.isDark(r, c)) continue;
-        ctx.fillStyle = accent;
-        ctx.fillRect(c * cell - QR / 2, r * cell - QR / 2, cell + 0.5, cell + 0.5);
+        ctx.fillRect(c * cell - half, r * cell - half, cell + 0.5, cell + 0.5);
       }
     }
-
     ctx.restore();
-
-    /* ---- caption ---- */
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#3a0f2a';
-    ctx.font = '600 13px Manrope, system-ui, sans-serif';
-    ctx.fillText('наведи камеру на сердечко', W / 2, H - capH + 20);
-    ctx.fillStyle = '#a06a90';
-    ctx.font = '400 11px Manrope, system-ui, sans-serif';
-    var url = text.length > 44 ? text.slice(0, 42) + '…' : text;
-    ctx.fillText(url, W / 2, H - capH + 38);
 
     return cv;
   }
