@@ -1,19 +1,20 @@
 /* ============================================================
-   Heart-shaped pixel QR (reference style).
-   - the module grid is rotated 45 deg, so the three finder
-     patterns land at top / left / right of the heart
-   - everything is clipped to the heart silhouette, which gives
-     the jagged pixel edge
-   - pink modules on a white field (white bg is mandatory for
-     a scannable code)
-   - level H error correction (30 %) compensates for cropped data
+   Heart-shaped QR (reference style).
+   - a compact QR code is drawn WHOLE in the middle of the heart,
+     tilted by a small angle so every scanner can still read it
+   - a white plate under it keeps the mandatory quiet zone free,
+     which is what actually makes the code scannable
+   - the rest of the heart is filled with random pink modules in
+     the same pixel style (decoration only, kept away from the
+     quiet zone)
+   - level H error correction, pink on white
    Depends on qrcode-generator (window.qrcode).
    ============================================================ */
 (function () {
   'use strict';
 
-  var ANGLE = Math.PI / 4;          // 45 deg
-  var COS = Math.cos(ANGLE), SIN = Math.sin(ANGLE);
+  var DEG = Math.PI / 180;
+  var TILT = -12;                   // degrees: tilted look, still scannable
 
   /* classic parametric heart as a Path2D, centred at (cx,cy), half-width hw */
   function heartPath2D(cx, cy, hw) {
@@ -31,27 +32,39 @@
     return p;
   }
 
-  /* grid space (u,v) -> screen space, rotated 45 deg about (cx,cy) */
-  function toScreen(cx, cy, u, v) {
-    return [cx + u * COS - v * SIN, cy + u * SIN + v * COS];
+  /* deterministic pseudo random, so the decoration is stable between redraws */
+  function rng(seed) {
+    var s = seed >>> 0;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      var t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
   }
 
-  /* A heart is a point at the bottom and has a notch on top, so no square
-     can ever sit fully inside it. A 45 deg rotated grid is the closest fit:
-     its free corner lands on the tip and the three finder corners land at
-     the top, left and right of the heart - exactly where there is room.
-     The grid is sized so it spans the heart body; whatever sticks out of
-     the silhouette is clipped away, which is what makes the pixel edge. */
-  function fitGrid(hw, n) {
+  /* biggest tilted square plate that still fits inside the heart.
+     The heart is pinched on top (notch) and ends in a tip below, so the
+     plate centre is searched over a vertical range. */
+  function fitPlate(inPath, cx, cy, hw, tilt) {
     var hh = hw * (31 / 32);
-    var D = hw * 0.82;              // half diagonal of the rotated grid
-    var h = D / Math.SQRT2;         // half side of the grid square
-    var L = h * 2;
-    return { L: L, cell: L / n, dy: hh * 0.15625 };
-  }
-
-  function isFinder(r, c, n) {
-    return (r < 7 && c < 7) || (r < 7 && c >= n - 7) || (r >= n - 7 && c < 7);
+    var co = Math.cos(tilt), si = Math.sin(tilt);
+    var best = 0, bestCy = cy;
+    for (var f = -0.06; f <= 0.30; f += 0.02) {
+      var y = cy + f * hh;
+      for (var S = hw * 2; S >= hw * 0.5; S -= 2) {
+        var h = S / 2;
+        var pts = [[-h, -h], [h, -h], [h, h], [-h, h]];
+        var ok = true;
+        for (var k = 0; k < 4; k++) {
+          var px = cx + pts[k][0] * co - pts[k][1] * si;
+          var py = y + pts[k][0] * si + pts[k][1] * co;
+          if (!inPath(px, py)) { ok = false; break; }
+        }
+        if (ok) { if (S > best) { best = S; bestCy = y; } break; }
+      }
+    }
+    return { size: best, cy: bestCy };
   }
 
   function siteUrl() {
@@ -62,7 +75,10 @@
     var text = opts.text || siteUrl();
     var accent = opts.accent || '#e5188c';
 
-    var qr = window.qrcode(0, 'H');
+    /* The symbol is drawn whole now, so heavy error correction is not
+       needed. Lower level => smaller version => bigger modules => the
+       phone camera locks on much faster. */
+    var qr = window.qrcode(0, 'M');
     qr.addData(text);
     qr.make();
     var n = qr.getModuleCount();
@@ -84,50 +100,66 @@
     ctx.scale(S, S);
 
     var path = heartPath2D(cx, cy, hw);
-    /* slightly puffy heart used only for the finder patterns, so the three
-       corner squares stay readable instead of being shaved by the silhouette */
-    var puffy = heartPath2D(cx, cy + hw * 0.02, hw * 1.10);
+    var probe = document.createElement('canvas').getContext('2d');
+    probe.canvas.width = W; probe.canvas.height = H;
+    function inPath(x, y) { return probe.isPointInPath(path, x, y); }
 
-    var fit = fitGrid(hw, n);
-    var cell = fit.cell;
-    var L = fit.L;
-    var gridCy = cy + fit.dy;
+    /* ---- tilted plate that fits inside the heart ---- */
+    var PLATE_TILT = TILT * DEG;
+    var fit = fitPlate(inPath, cx, cy, hw, PLATE_TILT);
+    var maxPlate = fit.size;
+    var plateSize = Math.min(maxPlate, hw * 0.95);    // keep it "small"
+    if (plateSize < hw * 0.5) throw new Error('сердце слишком маленькое для QR');
+    var plateCy = fit.cy;
 
     /* ---- white heart field ---- */
     ctx.fillStyle = '#fffdf9';
     ctx.fill(path);
 
-    /* ---- modules, clipped to the heart ---- */
+    /* ---- decoration: random pink modules in the empty parts of the heart ---- */
+    var RND_CELL = 9;
+    var halfW = W / 2, halfH = H / 2;
+    var rnd = rng(Math.round(hw * 1000));
     ctx.save();
     ctx.clip(path);
-    ctx.translate(cx, gridCy);
-    ctx.rotate(ANGLE);
-    ctx.translate(-L / 2, -L / 2);
-
-    ctx.fillStyle = accent;
-    for (var r = 0; r < n; r++) {
-      for (var c = 0; c < n; c++) {
-        if (!qr.isDark(r, c)) continue;
-        ctx.fillRect(c * cell, r * cell, cell + 0.5, cell + 0.5);
+    for (var dy = -halfH; dy < halfH; dy += RND_CELL) {
+      for (var dx = -halfW; dx < halfW; dx += RND_CELL) {
+        var sx = cx + dx, sy = cy + dy;
+        if (!inPath(sx, sy)) continue;
+        /* skip if inside or close to the plate (keep quiet zone clear) */
+        var ddx = dx, ddy = dy - (plateCy - cy);
+        var rdx =  ddx * Math.cos(-PLATE_TILT) - ddy * Math.sin(-PLATE_TILT);
+        var rdy =  ddx * Math.sin(-PLATE_TILT) + ddy * Math.cos(-PLATE_TILT);
+        if (Math.abs(rdx) < plateSize * 0.72 && Math.abs(rdy) < plateSize * 0.72) continue;
+        if (rnd() > 0.36) continue;
+        ctx.fillStyle = accent;
+        ctx.fillRect(sx - RND_CELL / 2, sy - RND_CELL / 2, RND_CELL, RND_CELL);
       }
     }
     ctx.restore();
 
-    /* ---- finder patterns: 7x7 ring + 3x3 core, same pink as the rest ---- */
+    /* ---- QR on white plate, tilted ---- */
     ctx.save();
-    ctx.clip(puffy);
-    ctx.translate(cx, gridCy);
-    ctx.rotate(ANGLE);
-    ctx.translate(-L / 2, -L / 2);
-    [[0, 0], [n - 7, 0], [0, n - 7]].forEach(function (a) {
-      var x = a[1] * cell, y = a[0] * cell;
-      ctx.fillStyle = accent;
-      ctx.fillRect(x, y, cell * 7, cell * 7);
-      ctx.fillStyle = '#fffdf9';
-      ctx.fillRect(x + cell, y + cell, cell * 5, cell * 5);
-      ctx.fillStyle = accent;
-      ctx.fillRect(x + cell * 2, y + cell * 2, cell * 3, cell * 3);
-    });
+    ctx.translate(cx, plateCy);
+    ctx.rotate(PLATE_TILT);
+
+    /* white plate background */
+    ctx.fillStyle = '#fffdf9';
+    var pH = plateSize / 2;
+    ctx.fillRect(-pH, -pH, plateSize, plateSize);
+
+    /* QR modules. 1/10 of the plate side on each margin = 4+ modules of
+       quiet zone, which the spec requires around the symbol. */
+    var QR = Math.min(plateSize / 1.25, 190);
+    var cell = QR / n;
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        if (!qr.isDark(r, c)) continue;
+        ctx.fillStyle = accent;
+        ctx.fillRect(c * cell - QR / 2, r * cell - QR / 2, cell + 0.5, cell + 0.5);
+      }
+    }
+
     ctx.restore();
 
     /* ---- caption ---- */
