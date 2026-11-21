@@ -1,41 +1,64 @@
 /* ============================================================
    Heart-shaped QR, reference style.
-   - fat heart = two circles (lobes) + triangle (tip), all subpaths
-     wound the SAME way so nonzero fill unions them into one shape
-   - the QR itself is a compact tilted square drawn fully INSIDE the
-     heart, so its three finder patterns are never cropped and every
-     scanner can read it; the white heart is its quiet zone
-   - the remaining heart area is filled with random pink modules of
-     the same size, clipped by the silhouette => jagged pixel edge
+   - heart drawn with a single bezier path (no subpaths, no holes)
+   - a compact tilted QR sits whole inside the heart (never cropped),
+     so all three finder patterns are readable
+   - remaining heart area is filled with random pink pixel modules
    Depends on qrcode-generator (window.qrcode).
    ============================================================ */
 (function () {
   'use strict';
 
   var DEG = Math.PI / 180;
-  var TILT = 12 * DEG;              // slight tilt, still scannable
+  var TILT = 12 * DEG;
   var TCOS = Math.cos(TILT), TSIN = Math.sin(TILT);
 
-  /* fat heart: two circles + triangle, consistent winding */
-  function buildHeart(cx, topY, hw) {
-    var r = hw * 0.55;
-    var lobeY = topY + r;
-    var tipY = topY + hw * 1.95;
-    var p = new Path2D();
-    p.moveTo(cx - hw * 0.45 + r, lobeY);
-    p.arc(cx - hw * 0.45, lobeY, r, 0, Math.PI * 2);
-    p.closePath();
-    p.moveTo(cx + hw * 0.45 + r, lobeY);
-    p.arc(cx + hw * 0.45, lobeY, r, 0, Math.PI * 2);
-    p.closePath();
-    p.moveTo(cx - hw, lobeY);          // clockwise, same as the arcs
-    p.lineTo(cx + hw, lobeY);
-    p.lineTo(cx, tipY);
-    p.closePath();
-    return { path: p, topY: topY, lobeY: lobeY, tipY: tipY, hw: hw, cx: cx };
+  /* Draw a heart outline on ctx (does NOT begin/fill, just traces path).
+     cx, cy = center; hw = half-width. */
+  function traceHeart(ctx, cx, cy, hw) {
+    var top = cy - hw * 0.75;
+    var tip = cy + hw * 1.20;
+    var notch = cy - hw * 0.20;
+    ctx.moveTo(cx, notch);
+    // left lobe
+    ctx.bezierCurveTo(cx - hw * 0.1, notch - hw * 0.5,
+                      cx - hw * 0.9, top,
+                      cx - hw, top + hw * 0.3);
+    ctx.bezierCurveTo(cx - hw * 1.0, top + hw * 0.8,
+                      cx - hw * 0.6, cy + hw * 0.3,
+                      cx, tip);
+    // right lobe
+    ctx.bezierCurveTo(cx + hw * 0.6, cy + hw * 0.3,
+                      cx + hw * 1.0, top + hw * 0.8,
+                      cx + hw, top + hw * 0.3);
+    ctx.bezierCurveTo(cx + hw * 0.9, top,
+                      cx + hw * 0.1, notch - hw * 0.5,
+                      cx, notch);
+    ctx.closePath();
   }
 
-  /* corners of a square of side S centred at (cx,gy), tilted by TILT */
+  /* Build a Path2D for the heart (for clip/fill) */
+  function heartPath2D(cx, cy, hw) {
+    var p = new Path2D();
+    traceHeart(p, cx, cy, hw);
+    return p;
+  }
+
+  /* Pixel-based hit test: draw heart on an offscreen canvas, then check pixels */
+  function makeHitTester(W, H, path) {
+    var c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    var pctx = c.getContext('2d');
+    pctx.fillStyle = '#000';
+    pctx.fill(path);
+    var imgData = pctx.getImageData(0, 0, W, H).data;
+    return function (x, y) {
+      var xi = Math.round(x), yi = Math.round(y);
+      if (xi < 0 || xi >= W || yi < 0 || yi >= H) return false;
+      return imgData[(yi * W + xi) * 4 + 3] > 128;
+    };
+  }
+
   function squareCorners(cx, gy, S) {
     var h = S / 2;
     var pts = [[-h, -h], [h, -h], [h, h], [-h, h]];
@@ -45,11 +68,13 @@
   }
 
   /* largest tilted square fully inside the heart */
-  function fitPlate(inPath, heart) {
+  function fitPlate(inPath, W, H) {
     var best = null;
-    for (var S = heart.hw * 1.25; S >= heart.hw * 0.4; S -= 2) {
-      for (var gy = heart.topY + S * 0.35; gy <= heart.tipY - S * 0.4; gy += 3) {
-        var c = squareCorners(heart.cx, gy, S);
+    var cx = W / 2;
+    var cy = H / 2;
+    for (var S = W * 0.6; S >= W * 0.2; S -= 2) {
+      for (var gy = cy - H * 0.1; gy <= cy + H * 0.1; gy += 3) {
+        var c = squareCorners(cx, gy, S);
         if (inPath(c[0][0], c[0][1]) && inPath(c[1][0], c[1][1]) &&
             inPath(c[2][0], c[2][1]) && inPath(c[3][0], c[3][1])) {
           best = { S: S, gy: gy };
@@ -61,7 +86,7 @@
     return best;
   }
 
-  /* deterministic PRNG so the decoration looks the same on every redraw */
+  /* deterministic PRNG */
   function rng(seed) {
     var s = seed >>> 0;
     return function () {
@@ -80,7 +105,7 @@
     var text = opts.text || siteUrl();
     var accent = opts.accent || '#e5188c';
 
-    var qr = window.qrcode(0, 'M');   // whole symbol => light EC, bigger modules
+    var qr = window.qrcode(0, 'M');
     qr.addData(text);
     qr.make();
     var n = qr.getModuleCount();
@@ -88,9 +113,9 @@
     var hw = 200;
     var pad = 26;
     var W = Math.round(hw * 2 + pad * 2);
-    var H = Math.round(hw * 1.95 + pad * 2);
+    var H = Math.round(hw * 2.2 + pad * 2);
     var cx = W / 2;
-    var topY = pad;
+    var cy = H / 2;
 
     var S = Math.min(3, (window.devicePixelRatio || 1) * 1.5);
     var cv = document.createElement('canvas');
@@ -99,35 +124,31 @@
     var ctx = cv.getContext('2d');
     ctx.scale(S, S);
 
-    var heart = buildHeart(cx, topY, hw);
+    var path = heartPath2D(cx, cy, hw);
+    var inPath = makeHitTester(W, H, path);
 
-    var probe = document.createElement('canvas').getContext('2d');
-    probe.canvas.width = W; probe.canvas.height = H;
-    function inPath(x, y) { return probe.isPointInPath(heart.path, x, y); }
-
-    var fit = fitPlate(inPath, heart);
+    var fit = fitPlate(inPath, W, H);
     if (!fit) throw new Error('Не удалось вписать QR в сердце');
 
     var plate = fit.S;
     var plateCy = fit.gy;
-    var quiet = plate * 0.06;                 // white margin around the symbol
+    var quiet = plate * 0.06;
     var qrSide = plate - quiet * 2;
     var cell = qrSide / n;
 
     /* ---- white heart field ---- */
     ctx.fillStyle = '#fffdf9';
-    ctx.fill(heart.path);
+    ctx.fill(path);
 
     /* ---- decoration: pixel modules in the free part of the heart ---- */
     ctx.save();
-    ctx.clip(heart.path);
+    ctx.clip(path);
     var rnd = rng(Math.round(plate * 1000) + n);
-    var guard = plate / 2 + cell * 2;         // keep the quiet zone clean
+    var guard = plate / 2 + cell * 2;
     for (var dy = -H; dy <= H; dy += cell) {
       for (var dx = -W; dx <= W; dx += cell) {
-        var sx = cx + dx, sy = topY + dy;
+        var sx = cx + dx, sy = cy + dy;
         if (!inPath(sx, sy)) continue;
-        /* distance to the plate measured in the plate's own axes */
         var ux =  dx * TCOS + (sy - plateCy) * TSIN;
         var uy = -dx * TSIN + (sy - plateCy) * TCOS;
         if (Math.abs(ux) < guard && Math.abs(uy) < guard) continue;
@@ -138,7 +159,7 @@
     }
     ctx.restore();
 
-    /* ---- the QR itself, tilted, drawn whole (never cropped) ---- */
+    /* ---- the QR itself, tilted, drawn whole ---- */
     ctx.save();
     ctx.translate(cx, plateCy);
     ctx.rotate(TILT);
@@ -217,7 +238,6 @@
   window.QR_CLOSE = close;
   window.SITE_URL = siteUrl;
 
-  /* open the QR straight from the address bar: site/#qr */
   window.addEventListener('load', function () {
     if (location.hash === '#qr') show();
   });
