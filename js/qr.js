@@ -1,10 +1,13 @@
 /* ============================================================
    Heart-shaped QR, reference style.
-   - fat heart drawn with a single bezier path
-   - the QR grid is rotated 45 deg and drawn FULL SIZE, clipped
-     by the heart silhouette => jagged pixel edge everywhere,
-     finder patterns also clipped by the contour
-   - level H (30 %) error correction keeps it scannable
+   - fat heart, single bezier path
+   - QR grid rotated 45 deg: the three finder patterns sit at the
+     TOP / LEFT / RIGHT vertices of the diamond (the thick parts of
+     the heart) and the free corner points at the tip
+   - the finder squares MUST stay fully inside the heart, otherwise
+     no scanner can lock on the code; the data modules are allowed
+     to be cropped by the silhouette (that is what makes the jagged
+     pixel edge) and level-H error correction recovers them
    Depends on qrcode-generator (window.qrcode).
    ============================================================ */
 (function () {
@@ -13,8 +16,6 @@
   var ANGLE = Math.PI / 4;
   var COS = Math.cos(ANGLE), SIN = Math.sin(ANGLE);
 
-  /* Draw heart outline on ctx (single bezier, no subpaths).
-     cx, cy = center; hw = half-width. */
   function traceHeart(ctx, cx, cy, hw) {
     var top = cy - hw * 0.75;
     var tip = cy + hw * 1.20;
@@ -41,7 +42,6 @@
     return p;
   }
 
-  /* Pixel-based hit test */
   function makeHitTester(W, H, path) {
     var c = document.createElement('canvas');
     c.width = W; c.height = H;
@@ -54,6 +54,55 @@
       if (xi < 0 || xi >= W || yi < 0 || yi >= H) return false;
       return imgData[(yi * W + xi) * 4 + 3] > 128;
     };
+  }
+
+  /* grid coords (u,v) -> screen, rotated 45 deg about (cx,gy) */
+  function toScreen(cx, gy, u, v) {
+    return [cx + u * COS - v * SIN, gy + u * SIN + v * COS];
+  }
+
+  /* Largest 45deg grid whose three finder squares are FULLY inside.
+     Grid square side = D*sqrt(2) where D is the half diagonal; the four
+     grid corners land on the diamond vertices: TL=top, TR=right, BL=left,
+     BR=bottom(tip). Finder blocks are anchored at TL, TR, BL. */
+  function fitGrid(inPath, cx, cy, hw, n) {
+    var topY = cy - hw * 0.75;
+    var tipY = cy + hw * 1.20;
+    for (var D = hw * 1.30; D >= hw * 0.55; D -= 3) {
+      var side = D * Math.SQRT2;
+      var f = side / n * 7;                 // finder square side
+      var half = side / 2;
+      // three finder blocks described by their grid-space corner + growth dirs
+      var blocks = [
+        [-half, -half,  1,  1],   // TL  -> top vertex
+        [ half - f, -half, -1,  1],// TR  -> right vertex
+        [-half,  half - f,  1, -1] // BL  -> left vertex
+      ];
+      for (var gy = cy - hw * 0.15; gy <= cy + hw * 0.45; gy += 4) {
+        var ok = true;
+        for (var k = 0; k < 3 && ok; k++) {
+          var b = blocks[k];
+          var pts = [
+            [b[0], b[1]],
+            [b[0] + f * b[2], b[1]],
+            [b[0], b[1] + f * b[3]],
+            [b[0] + f * b[2], b[1] + f * b[3]]
+          ];
+          for (var j = 0; j < 4; j++) {
+            var s = toScreen(cx, gy, pts[j][0], pts[j][1]);
+            if (!inPath(s[0], s[1])) { ok = false; break; }
+          }
+        }
+        // the free (bottom) corner may stick out only slightly, and never
+        // above the tip - otherwise the tip area stays empty
+        if (ok) {
+          var bot = toScreen(cx, gy, half, half);
+          if (bot[1] > tipY + f * 0.6) ok = false;
+        }
+        if (ok) return { D: D, gy: gy };
+      }
+    }
+    return null;
   }
 
   function siteUrl() {
@@ -86,24 +135,24 @@
     var path = heartPath2D(cx, cy, hw);
     var inPath = makeHitTester(W, H, path);
 
+    var fit = fitGrid(inPath, cx, cy, hw, n);
+    var D, gy;
+    if (fit) { D = fit.D; gy = fit.gy; }
+    else { D = hw * 1.0; gy = cy + hw * 0.05; }   // fallback: still scannable
+
+    var side = D * Math.SQRT2;
+    var cell = side / n;
+    var half = side / 2;
+
     /* ---- white heart field ---- */
     ctx.fillStyle = '#fffdf9';
     ctx.fill(path);
 
-    /* ---- 45 deg rotated QR grid, clipped to heart ---- */
+    /* ---- modules, clipped to the heart ---- */
     ctx.save();
     ctx.clip(path);
-    ctx.translate(cx, cy);
+    ctx.translate(cx, gy);
     ctx.rotate(ANGLE);
-
-    /* Grid size: the heart is roughly hw x 1.95hw.
-       At 45 deg a square of side L projects to a diamond of diagonal L*sqrt(2).
-       We want the diamond to span the heart, so L*sqrt(2) ≈ 2*hw => L = hw*sqrt(2).
-       But the heart is taller than wide, so we scale a bit larger. */
-    var side = hw * 2.2;
-    var cell = side / n;
-    var half = side / 2;
-
     ctx.fillStyle = accent;
     for (var r = 0; r < n; r++) {
       for (var c = 0; c < n; c++) {
