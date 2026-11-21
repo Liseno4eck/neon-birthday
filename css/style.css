@@ -234,24 +234,6 @@ body::before{
 }
 @media (prefers-reduced-motion:reduce){ *{animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important} }
 
-/* ---------- QR modal ---------- */
-#qrModal{position:fixed; inset:0; z-index:120; display:grid; place-items:center; padding:18px;
-  background:rgba(5,0,12,.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
-  animation:qrFade .3s ease both}
-@keyframes qrFade{from{opacity:0}to{opacity:1}}
-.qr-card{position:relative; max-width:min(420px,94vw); width:100%; padding:22px 20px 20px; text-align:center;
-  background:linear-gradient(160deg,#fffdf9,#ffeef8); border:1px solid #f6c8e4; border-radius:22px;
-  box-shadow:0 0 70px rgba(255,43,209,.35),0 30px 80px rgba(0,0,0,.55);
-  animation:qrPop .38s cubic-bezier(.2,.9,.2,1.2) both}
-@keyframes qrPop{from{opacity:0;transform:scale(.86) translateY(18px)}to{opacity:1;transform:none}}
-.qr-card b{display:block; font-family:'Unbounded'; font-weight:500; font-size:15px; margin:0 0 4px; color:#3a0f2a}
-.qr-x{position:absolute; top:10px; right:12px; width:30px; height:30px; border:0; border-radius:50%;
-  background:rgba(58,15,42,.08); color:#3a0f2a; font-size:14px; cursor:pointer; transition:.2s}
-.qr-x:hover{background:var(--n1); color:#fff}
-.qr-canvas{display:grid; place-items:center; margin:10px 0 12px}
-.qr-canvas canvas{max-width:100%; height:auto}
-.qr-url{font-size:11px; color:#8d4f7c; word-break:break-all; margin-bottom:14px; letter-spacing:.02em}
-.qr-actions{display:flex; gap:8px; justify-content:center; flex-wrap:wrap}
 
 /* ---------- admin: current settings ---------- */
 .a-cur{background:rgba(0,229,255,.06); border:1px solid rgba(0,229,255,.28); border-radius:12px; padding:12px; margin:0 0 18px}
