@@ -1,33 +1,31 @@
 /* ============================================================
    Heart-shaped QR, reference style.
-   - heart drawn with a single bezier path (no subpaths, no holes)
-   - a compact tilted QR sits whole inside the heart (never cropped),
-     so all three finder patterns are readable
-   - remaining heart area is filled with random pink pixel modules
+   - fat heart drawn with a single bezier path
+   - the QR grid is rotated 45 deg and drawn FULL SIZE, clipped
+     by the heart silhouette => jagged pixel edge everywhere,
+     finder patterns also clipped by the contour
+   - level H (30 %) error correction keeps it scannable
    Depends on qrcode-generator (window.qrcode).
    ============================================================ */
 (function () {
   'use strict';
 
-  var DEG = Math.PI / 180;
-  var TILT = 12 * DEG;
-  var TCOS = Math.cos(TILT), TSIN = Math.sin(TILT);
+  var ANGLE = Math.PI / 4;
+  var COS = Math.cos(ANGLE), SIN = Math.sin(ANGLE);
 
-  /* Draw a heart outline on ctx (does NOT begin/fill, just traces path).
+  /* Draw heart outline on ctx (single bezier, no subpaths).
      cx, cy = center; hw = half-width. */
   function traceHeart(ctx, cx, cy, hw) {
     var top = cy - hw * 0.75;
     var tip = cy + hw * 1.20;
     var notch = cy - hw * 0.20;
     ctx.moveTo(cx, notch);
-    // left lobe
     ctx.bezierCurveTo(cx - hw * 0.1, notch - hw * 0.5,
                       cx - hw * 0.9, top,
                       cx - hw, top + hw * 0.3);
     ctx.bezierCurveTo(cx - hw * 1.0, top + hw * 0.8,
                       cx - hw * 0.6, cy + hw * 0.3,
                       cx, tip);
-    // right lobe
     ctx.bezierCurveTo(cx + hw * 0.6, cy + hw * 0.3,
                       cx + hw * 1.0, top + hw * 0.8,
                       cx + hw, top + hw * 0.3);
@@ -37,14 +35,13 @@
     ctx.closePath();
   }
 
-  /* Build a Path2D for the heart (for clip/fill) */
   function heartPath2D(cx, cy, hw) {
     var p = new Path2D();
     traceHeart(p, cx, cy, hw);
     return p;
   }
 
-  /* Pixel-based hit test: draw heart on an offscreen canvas, then check pixels */
+  /* Pixel-based hit test */
   function makeHitTester(W, H, path) {
     var c = document.createElement('canvas');
     c.width = W; c.height = H;
@@ -59,44 +56,6 @@
     };
   }
 
-  function squareCorners(cx, gy, S) {
-    var h = S / 2;
-    var pts = [[-h, -h], [h, -h], [h, h], [-h, h]];
-    return pts.map(function (q) {
-      return [cx + q[0] * TCOS - q[1] * TSIN, gy + q[0] * TSIN + q[1] * TCOS];
-    });
-  }
-
-  /* largest tilted square fully inside the heart */
-  function fitPlate(inPath, W, H) {
-    var best = null;
-    var cx = W / 2;
-    var cy = H / 2;
-    for (var S = W * 0.6; S >= W * 0.2; S -= 2) {
-      for (var gy = cy - H * 0.1; gy <= cy + H * 0.1; gy += 3) {
-        var c = squareCorners(cx, gy, S);
-        if (inPath(c[0][0], c[0][1]) && inPath(c[1][0], c[1][1]) &&
-            inPath(c[2][0], c[2][1]) && inPath(c[3][0], c[3][1])) {
-          best = { S: S, gy: gy };
-          break;
-        }
-      }
-      if (best) break;
-    }
-    return best;
-  }
-
-  /* deterministic PRNG */
-  function rng(seed) {
-    var s = seed >>> 0;
-    return function () {
-      s = (s + 0x6D2B79F5) >>> 0;
-      var t = Math.imul(s ^ (s >>> 15), 1 | s);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
   function siteUrl() {
     return location.origin + location.pathname.replace(/index.html$/, '');
   }
@@ -105,7 +64,7 @@
     var text = opts.text || siteUrl();
     var accent = opts.accent || '#e5188c';
 
-    var qr = window.qrcode(0, 'M');
+    var qr = window.qrcode(0, 'H');
     qr.addData(text);
     qr.make();
     var n = qr.getModuleCount();
@@ -127,48 +86,29 @@
     var path = heartPath2D(cx, cy, hw);
     var inPath = makeHitTester(W, H, path);
 
-    var fit = fitPlate(inPath, W, H);
-    if (!fit) throw new Error('Не удалось вписать QR в сердце');
-
-    var plate = fit.S;
-    var plateCy = fit.gy;
-    var quiet = plate * 0.06;
-    var qrSide = plate - quiet * 2;
-    var cell = qrSide / n;
-
     /* ---- white heart field ---- */
     ctx.fillStyle = '#fffdf9';
     ctx.fill(path);
 
-    /* ---- decoration: pixel modules in the free part of the heart ---- */
+    /* ---- 45 deg rotated QR grid, clipped to heart ---- */
     ctx.save();
     ctx.clip(path);
-    var rnd = rng(Math.round(plate * 1000) + n);
-    var guard = plate / 2 + cell * 2;
-    for (var dy = -H; dy <= H; dy += cell) {
-      for (var dx = -W; dx <= W; dx += cell) {
-        var sx = cx + dx, sy = cy + dy;
-        if (!inPath(sx, sy)) continue;
-        var ux =  dx * TCOS + (sy - plateCy) * TSIN;
-        var uy = -dx * TSIN + (sy - plateCy) * TCOS;
-        if (Math.abs(ux) < guard && Math.abs(uy) < guard) continue;
-        if (rnd() > 0.42) continue;
-        ctx.fillStyle = accent;
-        ctx.fillRect(sx - cell / 2, sy - cell / 2, cell, cell);
-      }
-    }
-    ctx.restore();
+    ctx.translate(cx, cy);
+    ctx.rotate(ANGLE);
 
-    /* ---- the QR itself, tilted, drawn whole ---- */
-    ctx.save();
-    ctx.translate(cx, plateCy);
-    ctx.rotate(TILT);
+    /* Grid size: the heart is roughly hw x 1.95hw.
+       At 45 deg a square of side L projects to a diamond of diagonal L*sqrt(2).
+       We want the diamond to span the heart, so L*sqrt(2) ≈ 2*hw => L = hw*sqrt(2).
+       But the heart is taller than wide, so we scale a bit larger. */
+    var side = hw * 2.2;
+    var cell = side / n;
+    var half = side / 2;
+
     ctx.fillStyle = accent;
-    var o = -qrSide / 2;
     for (var r = 0; r < n; r++) {
       for (var c = 0; c < n; c++) {
         if (!qr.isDark(r, c)) continue;
-        ctx.fillRect(o + c * cell, o + r * cell, cell + 0.4, cell + 0.4);
+        ctx.fillRect(c * cell - half, r * cell - half, cell + 0.6, cell + 0.6);
       }
     }
     ctx.restore();
