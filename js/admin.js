@@ -10,6 +10,7 @@
   var API = 'https://api.github.com';
   var LS = { tok: 'bd.tok', draft: 'bd.draft', sha: 'bd.sha' };
   var el = {}, sha = null, ready = false;
+  try { sha = localStorage.getItem(LS.sha) || null; } catch (e) {}
   var published = null;      // last settings visitors actually see
   var publishedAt = '';      // when they were published
 
@@ -91,8 +92,6 @@
       sec('Секрет и фон',
         '<label class="a-fld"><span>Секретная комбинация (вводится на экране с датой)</span>' +
         '<input data-f="secret" value="' + esc(get('secret')) + '"></label>' +
-        '<label class="a-fld"><span>Команда для QR-кода (вводится на странице)</span>' +
-        '<input data-f="qrCommand" value="' + esc(get('qrCommand')) + '"></label>' +
         '<div class="a-grid4">' +
         '<label class="a-fld"><span>Неон 1</span><input type="color" data-f="theme.n1" value="' + esc(get('theme.n1')) + '"></label>' +
         '<label class="a-fld"><span>Неон 2</span><input type="color" data-f="theme.n2" value="' + esc(get('theme.n2')) + '"></label>' +
@@ -102,8 +101,7 @@
       sec('Сохранение',
         '<div class="a-row"><button class="a-btn a-main" id="aSave">Опубликовать для всех</button>' +
         '<button class="a-btn" id="aReload">Отменить черновик</button></div>' +
-        '<div class="a-row"><button class="a-btn" id="aQr">Показать QR-код</button>' +
-        '<button class="a-btn" id="aRefresh">Обновить действующие</button></div>' +
+        '<div class="a-row"><button class="a-btn" id="aRefresh">Обновить действующие</button></div>' +
         '<p class="a-mini">Опубликованное сразу видно всем посетителям. Без токена изменения живут только в этом браузере.</p>') +
     '</div>';
   }
@@ -148,7 +146,7 @@
               : '<span class="a-live ok">совпадает с опубликованным</span>') + '</b></div>' +
       (publishedAt ? row('опубликовано', esc(publishedAt)) : '') +
       row('дата ДР', '<b>' + shortTxt(pub.birthday, 8) + '</b>') +
-      row('секрет / QR-команда', esc(shortTxt(pub.secret, 10)) + ' / ' + esc(shortTxt(pub.qrCommand, 10))) +
+      row('секрет', esc(shortTxt(pub.secret, 10))) +
       row('экран 1', shortTxt(pub.intro && pub.intro.title) + ' — ' + shortTxt(pub.intro && pub.intro.text, 22)) +
       row('экран 2', shortTxt(pub.check && pub.check.title) + ' — ' + shortTxt(pub.check && pub.check.text, 22)) +
       row('экран 3', shortTxt(pub.date && pub.date.title)) +
@@ -272,17 +270,27 @@
     }
     renderCurrent();
   }
-  function publish() {
+  function publish(retried) {
     if (!tok()) { window.TOAST('Сначала вставь GitHub token'); return; }
     state('публикую...');
     var json = JSON.stringify(window.CFG(), null, 2);
-    var body = {
-      message: 'update birthday content',
-      content: btoa(unescape(encodeURIComponent(json)))
-    };
-    if (sha) body.sha = sha;
-    gh('/repos/' + window.STORE.owner + '/' + window.STORE.repo + '/contents/' + window.STORE.path,
-      { method: 'PUT', body: JSON.stringify(body) })
+    var fileApi = '/repos/' + window.STORE.owner + '/' + window.STORE.repo + '/contents/' + window.STORE.path;
+
+    function put(withSha) {
+      var body = {
+        message: 'update birthday content',
+        content: btoa(unescape(encodeURIComponent(json)))
+      };
+      if (withSha) body.sha = withSha;
+      return gh(fileApi, { method: 'PUT', body: JSON.stringify(body) });
+    }
+
+    var chain = sha ? Promise.resolve(sha)
+      : gh(fileApi + '?ref=' + window.STORE.branch)
+          .then(function (r) { return r && r.sha; })
+          .catch(function () { return null; });   // file not there yet -> create it
+
+    chain.then(put)
       .then(function (r) {
         sha = r && r.content && r.content.sha;
         localStorage.setItem(LS.sha, sha || '');
@@ -293,7 +301,20 @@
         renderCurrent();
         window.TOAST('Сохранено — теперь это видят все');
       })
-      .catch(function (e) { state('ошибка сохранения'); window.TOAST('Не удалось: ' + e.message); });
+      .catch(function (e) {
+        var msg = e && e.message ? e.message : '';
+        // stale or missing sha (409 conflict / 422): refresh it once and retry
+        if (!retried && /sha|Last commit|conflict/i.test(msg)) {
+          sha = null;
+          localStorage.removeItem(LS.sha);
+          return gh(fileApi + '?ref=' + window.STORE.branch)
+            .then(function (r) { sha = r && r.sha; localStorage.setItem(LS.sha, sha || ''); })
+            .catch(function () { sha = null; })
+            .then(function () { return publish(true); });
+        }
+        state('ошибка сохранения');
+        window.TOAST('Не удалось: ' + msg);
+      });
   }
   function pull() {
     return gh('/repos/' + window.STORE.owner + '/' + window.STORE.repo + '/contents/' + window.STORE.path + '?ref=' + window.STORE.branch)
@@ -454,10 +475,6 @@
         return pull();
       }).then(function () { window.TOAST('Токен принят, контент загружен'); })
         .catch(function (e) { state('ошибка'); $('#aWho', el.root).textContent = e.message; });
-    };
-    $('#aQr', el.root).onclick = function () {
-      if (window.QR_SHOW) window.QR_SHOW();
-      else window.TOAST('QR-модуль не загружен');
     };
     $('#aRefresh', el.root).onclick = function () {
       fetchPublished();
