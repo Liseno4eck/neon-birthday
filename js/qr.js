@@ -1,20 +1,24 @@
 /* ============================================================
    Heart-shaped QR, reference style.
-   - fat heart, single bezier path
-   - QR grid rotated 45 deg: the three finder patterns sit at the
-     TOP / LEFT / RIGHT vertices of the diamond (the thick parts of
-     the heart) and the free corner points at the tip
-   - the finder squares MUST stay fully inside the heart, otherwise
-     no scanner can lock on the code; the data modules are allowed
-     to be cropped by the silhouette (that is what makes the jagged
-     pixel edge) and level-H error correction recovers them
+   - fat heart, single bezier path, filled with pink modules on a
+     white field; the modules are clipped by the silhouette, which
+     gives the jagged pixel edge and means NO empty areas
+   - the grid is rotated 45 deg, so the three finder patterns land
+     at the top / left / right of the heart like on the reference
+   - cropping a finder pattern makes a QR unreadable, so each finder
+     is redrawn on a small white plate that is guaranteed to stay
+     whole. The plate is the same colour as the heart background, so
+     it reads as part of the design
+   - level H (30 %) error correction recovers the cropped data
    Depends on qrcode-generator (window.qrcode).
    ============================================================ */
 (function () {
   'use strict';
 
   var ANGLE = Math.PI / 4;
-  var COS = Math.cos(ANGLE), SIN = Math.sin(ANGLE);
+
+  var WHITE = '#fffdf9';
+  var ACCENT = '#e5188c';
 
   function traceHeart(ctx, cx, cy, hw) {
     var top = cy - hw * 0.75;
@@ -42,76 +46,14 @@
     return p;
   }
 
-  function makeHitTester(W, H, path) {
-    var c = document.createElement('canvas');
-    c.width = W; c.height = H;
-    var pctx = c.getContext('2d');
-    pctx.fillStyle = '#000';
-    pctx.fill(path);
-    var imgData = pctx.getImageData(0, 0, W, H).data;
-    return function (x, y) {
-      var xi = Math.round(x), yi = Math.round(y);
-      if (xi < 0 || xi >= W || yi < 0 || yi >= H) return false;
-      return imgData[(yi * W + xi) * 4 + 3] > 128;
-    };
-  }
-
-  /* grid coords (u,v) -> screen, rotated 45 deg about (cx,gy) */
-  function toScreen(cx, gy, u, v) {
-    return [cx + u * COS - v * SIN, gy + u * SIN + v * COS];
-  }
-
-  /* Largest 45deg grid whose three finder squares are FULLY inside.
-     Grid square side = D*sqrt(2) where D is the half diagonal; the four
-     grid corners land on the diamond vertices: TL=top, TR=right, BL=left,
-     BR=bottom(tip). Finder blocks are anchored at TL, TR, BL. */
-  function fitGrid(inPath, cx, cy, hw, n) {
-    var topY = cy - hw * 0.75;
-    var tipY = cy + hw * 1.20;
-    for (var D = hw * 1.30; D >= hw * 0.55; D -= 3) {
-      var side = D * Math.SQRT2;
-      var f = side / n * 7;                 // finder square side
-      var half = side / 2;
-      // three finder blocks described by their grid-space corner + growth dirs
-      var blocks = [
-        [-half, -half,  1,  1],   // TL  -> top vertex
-        [ half - f, -half, -1,  1],// TR  -> right vertex
-        [-half,  half - f,  1, -1] // BL  -> left vertex
-      ];
-      for (var gy = cy - hw * 0.15; gy <= cy + hw * 0.45; gy += 4) {
-        var ok = true;
-        for (var k = 0; k < 3 && ok; k++) {
-          var b = blocks[k];
-          var pts = [
-            [b[0], b[1]],
-            [b[0] + f * b[2], b[1]],
-            [b[0], b[1] + f * b[3]],
-            [b[0] + f * b[2], b[1] + f * b[3]]
-          ];
-          for (var j = 0; j < 4; j++) {
-            var s = toScreen(cx, gy, pts[j][0], pts[j][1]);
-            if (!inPath(s[0], s[1])) { ok = false; break; }
-          }
-        }
-        // the free (bottom) corner may stick out only slightly, and never
-        // above the tip - otherwise the tip area stays empty
-        if (ok) {
-          var bot = toScreen(cx, gy, half, half);
-          if (bot[1] > tipY + f * 0.6) ok = false;
-        }
-        if (ok) return { D: D, gy: gy };
-      }
-    }
-    return null;
-  }
-
   function siteUrl() {
     return location.origin + location.pathname.replace(/index.html$/, '');
   }
 
   function draw(opts) {
     var text = opts.text || siteUrl();
-    var accent = opts.accent || '#e5188c';
+    var accent = opts.accent || ACCENT;
+    var white = opts.bg || WHITE;
 
     var qr = window.qrcode(0, 'H');
     qr.addData(text);
@@ -133,22 +75,18 @@
     ctx.scale(S, S);
 
     var path = heartPath2D(cx, cy, hw);
-    var inPath = makeHitTester(W, H, path);
 
-    var fit = fitGrid(inPath, cx, cy, hw, n);
-    var D, gy;
-    if (fit) { D = fit.D; gy = fit.gy; }
-    else { D = hw * 1.0; gy = cy + hw * 0.05; }   // fallback: still scannable
-
-    var side = D * Math.SQRT2;
+    /* grid: rotated square whose diagonal spans the heart width */
+    var gy = cy + hw * 0.06;
+    var side = hw * Math.SQRT2 * 1.02;
     var cell = side / n;
     var half = side / 2;
 
-    /* ---- white heart field ---- */
-    ctx.fillStyle = '#fffdf9';
+    /* ---- 1. white heart ---- */
+    ctx.fillStyle = white;
     ctx.fill(path);
 
-    /* ---- modules, clipped to the heart ---- */
+    /* ---- 2. data modules, clipped by the heart ---- */
     ctx.save();
     ctx.clip(path);
     ctx.translate(cx, gy);
@@ -160,6 +98,32 @@
         ctx.fillRect(c * cell - half, r * cell - half, cell + 0.6, cell + 0.6);
       }
     }
+    ctx.restore();
+
+    /* ---- 3. the three finder patterns on white plates, never cropped ---- */
+    var f = cell * 7;
+    var plate = f + cell * 2.6;             // quiet margin around the finder
+    var blocks = [
+      [-half, -half],                       // top
+      [half - f, -half],                    // right
+      [-half, half - f]                     // left
+    ];
+    ctx.save();
+    ctx.translate(cx, gy);
+    ctx.rotate(ANGLE);
+    blocks.forEach(function (b) {
+      var mx = (plate - f) / 2;
+      /* white plate + quiet zone */
+      ctx.fillStyle = white;
+      ctx.fillRect(b[0] - mx, b[1] - mx, plate, plate);
+      /* 7x7 ring */
+      ctx.fillStyle = accent;
+      ctx.fillRect(b[0], b[1], f, f);
+      ctx.fillStyle = white;
+      ctx.fillRect(b[0] + cell, b[1] + cell, cell * 5, cell * 5);
+      ctx.fillStyle = accent;
+      ctx.fillRect(b[0] + cell * 2, b[1] + cell * 2, cell * 3, cell * 3);
+    });
     ctx.restore();
 
     return cv;
