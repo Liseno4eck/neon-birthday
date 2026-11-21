@@ -1,21 +1,18 @@
 /* ============================================================
    Heart-shaped pixel QR, reference style:
    - fat rounded heart (two circles + triangle), almost square
-   - module grid rotated 45 deg: the three finder patterns sit in
-     the notch / left / right thick parts, the free corner aims
-     at the tip; everything is clipped by the silhouette, which
-     gives the jagged pixel edge
-   - grid size and vertical placement are searched numerically so
-     that all three finder squares stay >= 92 % visible
-   - level H (30 %) error correction makes the cropped code
-     scannable; pink modules on white
+   - module grid rotated 45 deg: finder patterns sit at the top /
+     left / right vertices of the diamond, the free corner aims at
+     the tip; the silhouette clips everything, which gives the
+     jagged pixel edge
+   - level H (30 %) error correction keeps the cropped code
+     scannable; pink modules on a white heart
    Depends on qrcode-generator (window.qrcode).
    ============================================================ */
 (function () {
   'use strict';
 
   var ANGLE = Math.PI / 4;
-  var COS = Math.cos(ANGLE), SIN = Math.sin(ANGLE);
 
   /* fat heart: two circles for the lobes + triangle down to the tip */
   function buildHeart(cx, topY, hw) {
@@ -32,46 +29,6 @@
     return { path: p, topY: topY, lobeY: lobeY, tipY: tipY, hw: hw, cx: cx };
   }
 
-  /* grid coords (u,v) relative to grid centre -> screen coords */
-  function toScreen(cx, gy, u, v) {
-    return [cx + u * COS - v * SIN, gy + u * SIN + v * COS];
-  }
-
-  /* Largest rotated grid whose three finder squares stay visible.
-     Returns { D: half-diagonal, gy: grid centre y } or null. */
-  function fitGrid(inPath, heart, n) {
-    for (var D = heart.hw * 1.2; D >= heart.hw * 0.5; D -= 2) {
-      var side = D * Math.SQRT2;          // grid square side
-      var cell = side / n;
-      var f = cell * 7;                    // finder square side
-      var half = side / 2;
-      // finders in grid space: [u0, v0] = top-left corner of the 7x7 block
-      var finders = [
-        [-half, -half],          // TL -> top vertex (notch)
-        [ half - f, -half],      // TR -> right vertex
-        [-half,  half - f]       // BL -> left vertex
-      ];
-      for (var gy = heart.topY + D * 0.15; gy <= heart.tipY - D * 0.85; gy += 3) {
-        var ok = true;
-        for (var k = 0; k < 3 && ok; k++) {
-          var hits = 0, total = 0;
-          for (var i = 0; i <= 6; i++) {
-            for (var j = 0; j <= 6; j++) {
-              var s = toScreen(heart.cx, gy,
-                finders[k][0] + f * i / 6,
-                finders[k][1] + f * j / 6);
-              if (inPath(s[0], s[1])) hits++;
-              total++;
-            }
-          }
-          if (hits / total < 0.92) ok = false;
-        }
-        if (ok) return { D: D, gy: gy };
-      }
-    }
-    return null;
-  }
-
   function siteUrl() {
     return location.origin + location.pathname.replace(/index.html$/, '');
   }
@@ -86,9 +43,9 @@
     var n = qr.getModuleCount();
 
     var hw = 200;
-    var pad = 24;
+    var pad = 26;
     var W = Math.round(hw * 2 + pad * 2);
-    var H = Math.round(hw * 1.95 + pad * 2);
+    var H = Math.round(hw * 1.95 + pad * 2 + 40);
     var cx = W / 2;
     var topY = pad;
 
@@ -101,33 +58,40 @@
 
     var heart = buildHeart(cx, topY, hw);
 
-    var probe = document.createElement('canvas').getContext('2d');
-    probe.canvas.width = W; probe.canvas.height = H;
-    function inPath(x, y) { return probe.isPointInPath(heart.path, x, y); }
+    /* Diamond that spans the heart: half-diagonal D, centre (cx, gy).
+       Choose D so the diamond covers the heart width and height. */
+    var D = hw * 1.08;
+    var gy = (topY + heart.tipY) / 2 + hw * 0.04;
+    /* keep the bottom vertex above the tip so the tip stays pixel-clipped */
+    if (gy + D > heart.tipY + hw * 0.10) gy = heart.tipY + hw * 0.10 - D;
 
-    var fit = fitGrid(inPath, heart, n);
-    if (!fit) throw new Error('Не удалось подобрать сетку под сердце');
+    var side = D * Math.SQRT2;
+    var cell = side / n;
+    var half = side / 2;
 
-    /* white heart field */
+    /* ---- white heart field ---- */
     ctx.fillStyle = '#fffdf9';
     ctx.fill(heart.path);
 
-    /* modules clipped to the heart */
+    /* ---- modules, clipped to the heart ---- */
     ctx.save();
     ctx.clip(heart.path);
-    ctx.translate(cx, fit.gy);
+    ctx.translate(cx, gy);
     ctx.rotate(ANGLE);
-    var side = fit.D * Math.SQRT2;
-    var cell = side / n;
-    var half = side / 2;
     ctx.fillStyle = accent;
     for (var r = 0; r < n; r++) {
       for (var c = 0; c < n; c++) {
         if (!qr.isDark(r, c)) continue;
-        ctx.fillRect(c * cell - half, r * cell - half, cell + 0.5, cell + 0.5);
+        ctx.fillRect(c * cell - half, r * cell - half, cell + 0.6, cell + 0.6);
       }
     }
     ctx.restore();
+
+    /* ---- caption ---- */
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#3a0f2a';
+    ctx.font = '600 13px Manrope, system-ui, sans-serif';
+    ctx.fillText('наведи камеру на сердечко', cx, H - 22);
 
     return cv;
   }
